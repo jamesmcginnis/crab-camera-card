@@ -174,12 +174,16 @@ class CrabCameraCard extends HTMLElement {
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 12px 16px 18px;
+          padding: 12px 12px 18px;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
         }
         .scroll-wrap::-webkit-scrollbar { display: none; }
+        /* Give the first tile a visible gap from the card edge */
+        .cam-tile:first-child { margin-left: 6px; }
+        /* Mirror on the last tile so it clears the right-side fade */
+        .cam-tile:last-child  { margin-right: 6px; }
         .scroll-fade { position: relative; }
         .scroll-fade::after {
           content: ''; position: absolute;
