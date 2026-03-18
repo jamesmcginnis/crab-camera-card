@@ -6,24 +6,44 @@ A scrollable camera card for [Home Assistant](https://www.home-assistant.io/). D
 
 ---
 
-## Installation
+## Installation via HACS
 
-**Step 1 — Add the custom repository to HACS**
+**Step 1 — Add the custom repository**
 
-[![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=crab-camera-card&category=lovelace)
+Go to **HACS → Frontend → ⋮ (top right menu) → Custom repositories**
 
-> If the button doesn't open directly, go to **HACS → Frontend → ⋮ → Custom repositories**, paste `https://github.com/jamesmcginnis/crab-camera-card`, set the category to **Dashboard**, and click **Add**.
+| Field | Value |
+|-------|-------|
+| Repository | `https://github.com/jamesmcginnis/crab-camera-card` |
+| Category | **Dashboard** |
 
-**Step 2 — Install the card**
+Click **Add**, then close the dialog.
 
-Search for **Crab Camera Card** in HACS Frontend and click **Install**.
+**Step 2 — Install**
 
-**Step 3 — Add a resource (if not done automatically)**
+Search for **Crab Camera Card** in HACS Frontend and click **Download**.
+
+**Step 3 — Add the resource**
 
 Go to **Settings → Dashboards → ⋮ → Resources** and add:
-```
-/hacsfiles/crab-camera-card/crab-camera-card.js
-```
+
+| URL | Type |
+|-----|------|
+| `/hacsfiles/crab-camera-card/crab-camera-card.js` | JavaScript Module |
+
+Restart Home Assistant, then add the card to your dashboard.
+
+---
+
+## Manual Installation
+
+1. Download `crab-camera-card.js` from [the latest release](https://github.com/jamesmcginnis/crab-camera-card/releases)
+2. Copy to `/config/www/crab-camera-card.js`
+3. Go to **Settings → Dashboards → ⋮ → Resources** and add:
+
+| URL | Type |
+|-----|------|
+| `/local/crab-camera-card.js` | JavaScript Module |
 
 ---
 
