@@ -4,11 +4,17 @@
 
 A scrollable camera card for Home Assistant. Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
-## ➕ Add to HACS
+---
+
+## Installation
+
+**Step 1 — Add the custom repository to HACS**
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=crab-camera-card&category=lovelace)
 
-> Click the button above, or manually add `https://github.com/jamesmcginnis/crab-camera-card` as a custom Lovelace repository in HACS.
+**Step 2 — Install the card**
+
+Search for **Crab Camera Card** in HACS Frontend and click **Install**.
 
 ---
 
