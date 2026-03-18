@@ -1,5 +1,5 @@
 /**
- * Crab Camera Card v1.6.0
+ * Crab Camera Card
  * Scrollable camera card for Home Assistant
  * https://github.com/jamesmcginnis/crab-camera-card
  */
@@ -28,8 +28,8 @@ function isLiveCamera(hass, id) {
   for (const p of PATTERNS) {
     if (eid.includes(p) || name.includes(p)) return false;
   }
-  const WORDS   = ['snapshot','recording','detection','thumbnail','clip','still'];
-  const tokens  = name.split(/[\s_\-]+/);
+  const WORDS  = ['snapshot','recording','detection','thumbnail','clip','still'];
+  const tokens = name.split(/[\s_\-]+/);
   for (const w of WORDS) {
     if (tokens.includes(w)) return false;
   }
@@ -43,17 +43,18 @@ class CrabCameraCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass          = null;
-    this._config        = null;
-    this._prevPictures  = {};   // tracks entity_picture per camera for still updates
-    this._popupEl       = null;
-    this._popupKey      = null;
-    this._popupMuted    = true;
-    this._streamEl      = null;
-    this._fsListeners   = null;
-    this._pollTimer     = null;
-    this._renderedMode  = null;
-    this._renderedEnts  = null;
+    this._hass           = null;
+    this._config         = null;
+    this._prevPictures   = {};  // last-seen entity_picture per camera
+    this._prevTimestamps = {};  // last update time per camera
+    this._popupEl        = null;
+    this._popupKey       = null;
+    this._popupMuted     = true;
+    this._streamEl       = null;
+    this._fsListeners    = null;
+    this._pollTimer      = null;
+    this._renderedMode   = null;
+    this._renderedEnts   = null;
   }
 
   static getConfigElement() { return document.createElement('crab-camera-card-editor'); }
@@ -84,8 +85,8 @@ class CrabCameraCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    const mode     = this._config?.thumbnail_mode || 'still';
-    const entsKey  = JSON.stringify(this._config?.entities || []);
+    const mode    = this._config?.thumbnail_mode || 'still';
+    const entsKey = JSON.stringify(this._config?.entities || []);
     const needsRender =
       !this._renderedMode ||
       this._renderedMode !== mode ||
@@ -94,35 +95,35 @@ class CrabCameraCard extends HTMLElement {
     if (needsRender) {
       this._render();
     } else {
-      // Push updated hass to any live stream tiles
       this._updateLiveHass();
-      // For still mode: update each tile image when HA refreshes the camera snapshot.
-      // We detect a new snapshot by watching entity_picture changing in the state.
       this._updateStillImages();
       this._updateDots();
     }
   }
 
-  connectedCallback()    { /* timers removed — updates driven by hass */ }
+  connectedCallback()    { /* updates driven by hass */ }
   disconnectedCallback() { this._destroyPopup(); }
 
   // ── URL helpers ──────────────────────────────────────────────
-  // Use entity_picture when available — it contains HA's own freshness token
-  // and is updated by HA whenever the camera produces a new snapshot.
   _stillUrl(id) {
     const pic = this._hass?.states[id]?.attributes?.entity_picture;
-    if (pic) return pic.startsWith('http') ? pic : pic;
-    // Fallback for cameras that don't expose entity_picture
+    if (pic) return pic;
     const tok = this._hass?.states[id]?.attributes?.access_token || '';
     return `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
   }
 
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
+  _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
   _dotClass(online) {
     if (!online) return 'offline';
     return this._config?.thumbnail_mode === 'live' ? 'live' : 'still';
+  }
+
+  // Format a Date as "H:MM AM/PM"
+  _fmtTime(date) {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
   // ── Full render ──────────────────────────────────────────────
@@ -132,9 +133,20 @@ class CrabCameraCard extends HTMLElement {
     const { entities = [], show_title, title, thumbnail_mode } = this._config;
     const isLive = thumbnail_mode === 'live';
 
-    this._renderedMode = thumbnail_mode;
-    this._renderedEnts = JSON.stringify(entities);
-    this._prevPictures = {};
+    this._renderedMode   = thumbnail_mode;
+    this._renderedEnts   = JSON.stringify(entities);
+    this._prevPictures   = {};
+    this._prevTimestamps = {};
+
+    // Seed initial timestamps from HA state so the first render shows a time
+    if (!isLive) {
+      entities.forEach(id => {
+        const state = this._hass?.states[id];
+        if (state?.last_updated) {
+          this._prevTimestamps[id] = new Date(state.last_updated);
+        }
+      });
+    }
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -185,9 +197,44 @@ class CrabCameraCard extends HTMLElement {
           box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         }
 
+        /* Still-mode image */
         .cam-img {
           width: 100%; height: 100%;
           object-fit: cover; display: block;
+        }
+
+        /* Live stream slot — suppress any internal text/labels from ha-camera-stream */
+        .cam-stream-slot {
+          position: absolute; inset: 0;
+          width: 100%; height: 100%;
+          background: #111;
+          overflow: hidden;
+        }
+        /* Hide the "LIVE" badge / chip that ha-camera-stream renders internally.
+           These selectors target the known internal class names. */
+        .cam-stream-slot ha-camera-stream {
+          position: absolute; inset: 0;
+          width: 100%; height: 100%;
+          display: block;
+          pointer-events: none;
+          --ha-camera-stream-background: #111;
+          /* Suppress internal controls overlay */
+          --ha-camera-stream-controls-display: none;
+        }
+
+        /* Timestamp pill — top-left corner, still mode only */
+        .cam-ts {
+          position: absolute; top: 7px; left: 7px; z-index: 4;
+          background: rgba(0,0,0,.52);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          color: rgba(255,255,255,.82);
+          font-size: 9px; font-weight: 600;
+          letter-spacing: .03em;
+          padding: 2px 5px;
+          border-radius: 4px;
+          pointer-events: none;
+          font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
         }
 
         .cam-gradient {
@@ -260,6 +307,7 @@ class CrabCameraCard extends HTMLElement {
 
     let inner;
     if (!state || !online) {
+      // Offline overlay — no timestamp, no stream
       inner = `<div class="cam-offline">
         <svg viewBox="0 0 24 24" width="28" height="28" fill="#FF3B30" style="opacity:.6">
           <path d="M21 6.5l-4-4-1.27 1.27L21 9.77V6.5zM3.27 2 2 3.27l4.73 4.73A1 1 0 0 0 6 9v6a1 1 0 0 0 1 1h1.73L12 19.73V14l3.12 3.12A5 5 0 0 1 13 18.1v2.06c1.38-.32 2.63-.96 3.69-1.82L19.73 21 21 19.73l-9-9L3.27 2zM12 4 9.91 6.09 12 8.18V4z"/>
@@ -267,12 +315,18 @@ class CrabCameraCard extends HTMLElement {
         <span class="cam-offline-msg">Camera Offline</span>
       </div>`;
     } else if (isLive) {
-      inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"
-        style="position:absolute;inset:0;width:100%;height:100%;background:#111;"></div>`;
+      // Live mode — ha-camera-stream mounted programmatically after innerHTML is set.
+      // No timestamp pill in live mode (stream is real-time).
+      inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"></div>`;
     } else {
-      inner = `<img class="cam-img" id="${this._imgId(id)}"
-        src="${this._stillUrl(id)}" alt="${name}" draggable="false"
-        onerror="this.style.opacity='0.12'">`;
+      // Still mode — single-frame image with a timestamp pill top-left.
+      const ts  = this._prevTimestamps[id];
+      const tsTxt = ts ? this._fmtTime(ts) : '';
+      inner = `
+        <img class="cam-img" id="${this._imgId(id)}"
+          src="${this._stillUrl(id)}" alt="${name}" draggable="false"
+          onerror="this.style.opacity='0.12'">
+        ${tsTxt ? `<div class="cam-ts" id="${this._tsId(id)}">${tsTxt}</div>` : `<div class="cam-ts" id="${this._tsId(id)}" style="display:none"></div>`}`;
     }
 
     return `
@@ -286,7 +340,7 @@ class CrabCameraCard extends HTMLElement {
       </div>`;
   }
 
-  // ── Mount ha-camera-stream into each live tile ───────────────
+  // ── Mount ha-camera-stream into each live tile slot ──────────
   _mountLiveStreams() {
     (this._config?.entities || []).forEach(id => {
       const state = this._hass?.states[id];
@@ -297,31 +351,61 @@ class CrabCameraCard extends HTMLElement {
       const streamEl = document.createElement('ha-camera-stream');
       streamEl.hass     = this._hass;
       streamEl.stateObj = state;
+      // Muted so browser allows autoplay
       streamEl.setAttribute('muted', '');
       streamEl.setAttribute('autoplay', '');
       streamEl.setAttribute('playsinline', '');
-      streamEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;--ha-camera-stream-background:#111;';
+      // controls=false tells ha-camera-stream not to render its overlay UI
+      streamEl.controls = false;
+      streamEl.setAttribute('controls', 'false');
+      streamEl.style.cssText = [
+        'position:absolute', 'inset:0',
+        'width:100%', 'height:100%',
+        'display:block', 'pointer-events:none',
+        '--ha-camera-stream-background:#111',
+      ].join(';');
+
       slot.appendChild(streamEl);
       this._forceCoverVideo(streamEl);
     });
   }
 
+  // Wait for the <video> element inside ha-camera-stream, then force cover sizing
+  // and suppress any overlaid text labels the component may render
   _forceCoverVideo(streamEl) {
     const apply = vid => {
       vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
       vid.muted = true;
+      // Hide any sibling overlay elements (the "LIVE" chip) by walking the parent
+      try {
+        const parent = vid.parentElement;
+        if (parent) {
+          parent.querySelectorAll(':not(video)').forEach(el => {
+            if (el.nodeType === 1) el.style.display = 'none';
+          });
+        }
+      } catch (_) {}
     };
+
     const tryFind = () => {
+      // Light DOM
       let v = streamEl.querySelector('video');
-      if (!v && streamEl.shadowRoot) v = streamEl.shadowRoot.querySelector('video');
-      if (!v && streamEl.shadowRoot) {
+      if (v) { apply(v); return true; }
+      // Shadow DOM of ha-camera-stream
+      v = streamEl.shadowRoot?.querySelector('video');
+      if (v) { apply(v); return true; }
+      // Nested shadow DOM
+      if (streamEl.shadowRoot) {
         for (const c of streamEl.shadowRoot.querySelectorAll('*')) {
-          if (c.shadowRoot) { v = c.shadowRoot.querySelector('video'); if (v) break; }
+          if (c.shadowRoot) {
+            v = c.shadowRoot.querySelector('video');
+            if (v) { apply(v); return true; }
+          }
         }
       }
-      if (v) { apply(v); return true; }
       return false;
     };
+
     if (tryFind()) return;
     let n = 0;
     const t = setInterval(() => { n++; if (tryFind() || n > 30) clearInterval(t); }, 200);
@@ -337,23 +421,29 @@ class CrabCameraCard extends HTMLElement {
     });
   }
 
-  // ── Update still images when HA refreshes the camera snapshot ─
-  // HA updates entity_picture whenever the camera produces a new frame.
-  // We compare the current value against the last known value and swap
-  // the img src only when it actually changes — no polling timer needed.
+  // ── Update still images when HA pushes a new entity_picture ──
   _updateStillImages() {
     if (this._config?.thumbnail_mode !== 'still') return;
     (this._config?.entities || []).forEach(id => {
       const state = this._hass?.states[id];
       if (!state || state.state === 'unavailable') return;
+
       const pic = state.attributes?.entity_picture;
       if (!pic) return;
-      if (pic === this._prevPictures[id]) return; // unchanged
-      this._prevPictures[id] = pic;
+      if (pic === this._prevPictures[id]) return; // no change
+
+      this._prevPictures[id]   = pic;
+      const now                = new Date();
+      this._prevTimestamps[id] = now;
+
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) {
-        img.style.opacity = '1';
-        img.src = pic;
+      if (img) { img.style.opacity = '1'; img.src = pic; }
+
+      // Update the timestamp pill without a full re-render
+      const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+      if (tsEl) {
+        tsEl.textContent   = this._fmtTime(now);
+        tsEl.style.display = '';
       }
     });
   }
@@ -552,7 +642,6 @@ class CrabCameraCard extends HTMLElement {
       document.removeEventListener('fullscreenchange',       onFsChange);
       document.removeEventListener('webkitfullscreenchange', onFsChange);
     };
-
     this._popupKey = e => { if (e.key === 'Escape') this._destroyPopup(); };
     document.addEventListener('keydown', this._popupKey);
   }
@@ -682,8 +771,7 @@ class CrabCameraCardEditor extends HTMLElement {
         .toggle-track::after { content:'';position:absolute;width:27px;height:27px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .25s ease; }
         .toggle-switch input:checked + .toggle-track { background:#34C759; }
         .toggle-switch input:checked + .toggle-track::after { transform:translateX(20px); }
-        .seg-wrap { padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06); }
-        .seg-wrap:last-child { border-bottom:none; }
+        .seg-wrap { padding:12px 16px; }
         .seg-label { font-size:14px;font-weight:500;margin-bottom:8px; }
         .segmented { display:flex;background:rgba(118,118,128,.2);border-radius:9px;padding:2px;gap:2px; }
         .segmented input[type="radio"] { display:none; }
