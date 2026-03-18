@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
-An Apple HomeKit-style scrollable camera card for Home Assistant. Display all your cameras in a horizontal scrollable row — tap to view a large live feed, long-press for the native HA dialog.
+A scrollable camera card for Home Assistant. Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
 ## ➕ Add to HACS
 
@@ -14,14 +14,14 @@ An Apple HomeKit-style scrollable camera card for Home Assistant. Display all yo
 
 ## Features
 
-- 📹 **Scrollable camera strip** — cameras scroll off the sides just like Apple HomeKit
-- 🖼️ **Still Image mode** — last snapshot, auto-refreshed at your chosen interval
-- 🟢 **Live Feed mode** — MJPEG stream shown directly in each thumbnail
-- 🔍 **Tap to view** — Apple-style frosted popup with a large live view
+- 📹 **Scrollable camera strip** — swipe through all your cameras in a single row
+- 🖼️ **Still Image mode** — latest snapshot, updated automatically by Home Assistant
+- 🟢 **Live Feed mode** — true live stream in each thumbnail (HLS, WebRTC, MJPEG)
+- 🔍 **Tap to view** — full-screen popup with live stream, mute toggle and fullscreen button
 - 🔇 **Mute toggle** and **⛶ Fullscreen** button in the popup
 - 📋 **Long press** — opens the native Home Assistant more-info dialog
-- ✨ **Visual Editor** — only camera entities shown; drag-to-reorder; minimal inputs
-- 🟢 **Status dot** — glowing green = online, grey = unavailable
+- ✨ **Visual Editor** — only live cameras shown; drag-to-reorder; no unnecessary settings
+- 🔴🟡🟢 **Status dot** — red (offline), yellow (still mode), green (live mode)
 
 ---
 
@@ -35,7 +35,6 @@ entities:
   - camera.back_garden
   - camera.garage
 thumbnail_mode: still   # still | live
-refresh_interval: 10    # seconds (still mode only)
 ```
 
 | Option              | Default   | Description |
@@ -44,9 +43,8 @@ refresh_interval: 10    # seconds (still mode only)
 | `title`             | `Cameras` | Card header text |
 | `show_title`        | `true`    | Show/hide card title |
 | `thumbnail_mode`    | `still`   | `still` or `live` |
-| `refresh_interval`  | `10`      | Still image refresh in seconds |
 | `show_camera_names` | `true`    | Camera name below each tile |
-| `show_status_dot`   | `true`    | Online/offline indicator |
+| `show_status_dot`   | `true`    | Status indicator dot |
 
 ---
 
@@ -54,6 +52,6 @@ refresh_interval: 10    # seconds (still mode only)
 
 | Gesture        | Action |
 |----------------|--------|
-| **Tap**        | Opens Apple-style popup with live view |
+| **Tap**        | Opens full-screen popup with live view |
 | **Long press** | Opens native HA more-info dialog |
 | **Swipe**      | Scroll through all cameras |
