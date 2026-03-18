@@ -1,6 +1,6 @@
 {
   "name": "Crab Camera Card",
+  "description": "Scrollable camera card for Home Assistant with live feeds, still snapshots, and a full-screen popup viewer.",
   "render_readme": true,
-  "filename": "crab-camera-card.js",
-  "type": "plugin"
+  "filename": "crab-camera-card.js"
 }
