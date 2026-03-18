@@ -2,9 +2,15 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
-WORK IN PROGRESS!!
+WORK IN PROGRESS!!!!
 
 An Apple HomeKit-style scrollable camera card for [Home Assistant](https://www.home-assistant.io/).
+
+## ➕ Add to HACS
+
+[![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=crab-camera-card&category=lovelace)
+
+> Click the button above, or follow the manual steps below.
 
 ## Features
 
