@@ -126,6 +126,16 @@ class CrabCameraCard extends HTMLElement {
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
+  // Strip common suffixes/prefixes that camera integrations append to friendly names,
+  // e.g. "Kitchen Camera Live View" → "Kitchen Camera"
+  _cleanName(raw) {
+    return raw
+      .replace(/[\s\-_]*(live\s*view|live\s*feed|live\s*stream|live)[\s\-_]*$/i, '')
+      .replace(/[\s\-_]*(snapshot|still|recording|clip|thumbnail)[\s\-_]*$/i, '')
+      .replace(/^\s+|\s+$/g, '') // trim
+      || raw; // fallback to original if stripping removed everything
+  }
+
   // ── Full render ──────────────────────────────────────────────
   _render() {
     if (!this._hass || !this._config) return;
@@ -298,8 +308,9 @@ class CrabCameraCard extends HTMLElement {
   // ── Tile HTML ────────────────────────────────────────────────
   _tileHtml(id, isLive) {
     const state    = this._hass?.states[id];
-    const name     = state?.attributes?.friendly_name
+    const rawName  = state?.attributes?.friendly_name
                      || id.split('.').slice(1).join('.').replace(/_/g, ' ');
+    const name     = this._cleanName(rawName);
     const online   = state && state.state !== 'unavailable';
     const showDot  = this._config.show_status_dot !== false;
     const showName = this._config.show_camera_names !== false;
@@ -421,25 +432,42 @@ class CrabCameraCard extends HTMLElement {
     });
   }
 
-  // ── Update still images when HA pushes a new entity_picture ──
+  // ── Update still images whenever HA refreshes the camera state ──
+  // We track state.last_updated rather than entity_picture URL because
+  // many cameras keep the same URL but HA fires a state update with a new
+  // frame. On every state change we force-refresh the img with a cache-bust
+  // param so the browser fetches the latest frame regardless of URL equality.
   _updateStillImages() {
     if (this._config?.thumbnail_mode !== 'still') return;
     (this._config?.entities || []).forEach(id => {
       const state = this._hass?.states[id];
       if (!state || state.state === 'unavailable') return;
 
-      const pic = state.attributes?.entity_picture;
-      if (!pic) return;
-      if (pic === this._prevPictures[id]) return; // no change
+      // Use last_updated as the change signal
+      const updated = state.last_updated;
+      if (!updated) return;
+      if (updated === this._prevPictures[id]) return; // no change since last check
 
-      this._prevPictures[id]   = pic;
+      this._prevPictures[id]   = updated;
       const now                = new Date();
       this._prevTimestamps[id] = now;
 
-      const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) { img.style.opacity = '1'; img.src = pic; }
+      // Build the freshest URL — prefer entity_picture but always cache-bust
+      const pic = state.attributes?.entity_picture;
+      let src;
+      if (pic) {
+        // Append or replace _t param so browser doesn't serve a cached copy
+        const sep = pic.includes('?') ? '&' : '?';
+        src = `${pic}${sep}_t=${Date.now()}`;
+      } else {
+        const tok = state.attributes?.access_token || '';
+        src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
+      }
 
-      // Update the timestamp pill without a full re-render
+      const img = this.shadowRoot?.getElementById(this._imgId(id));
+      if (img) { img.style.opacity = '1'; img.src = src; }
+
+      // Update timestamp pill in-place
       const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
       if (tsEl) {
         tsEl.textContent   = this._fmtTime(now);
@@ -503,8 +531,10 @@ class CrabCameraCard extends HTMLElement {
     this._destroyPopup();
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
-    const name = state.attributes?.friendly_name
-                 || id.split('.').slice(1).join('.').replace(/_/g, ' ');
+    const name = this._cleanName(
+      state.attributes?.friendly_name
+      || id.split('.').slice(1).join('.').replace(/_/g, ' ')
+    );
     this._popupMuted = true;
 
     const el = document.createElement('div');
@@ -742,6 +772,15 @@ class CrabCameraCardEditor extends HTMLElement {
     }));
   }
 
+  // Mirror the card's name-cleaning logic so the editor shows the same names
+  _cleanName(raw) {
+    return raw
+      .replace(/[\s\-_]*(live\s*view|live\s*feed|live\s*stream|live)[\s\-_]*$/i, '')
+      .replace(/[\s\-_]*(snapshot|still|recording|clip|thumbnail)[\s\-_]*$/i, '')
+      .replace(/^\s+|\s+$/g, '')
+      || raw;
+  }
+
   _render() {
     if (!this._hass || !this._config) return;
     this._initialized = true;
@@ -754,6 +793,13 @@ class CrabCameraCardEditor extends HTMLElement {
       ...selected.filter(e => liveCameras.includes(e)),
       ...liveCameras.filter(e => !selected.includes(e)),
     ];
+
+    // Pre-compute cleaned display names so they're available inside the template
+    const displayName = id => {
+      const raw = this._hass.states[id]?.attributes?.friendly_name
+                  || id.replace('camera.', '').replace(/_/g, ' ');
+      return this._cleanName(raw);
+    };
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -816,8 +862,7 @@ class CrabCameraCardEditor extends HTMLElement {
               : `<div class="checklist" id="crabList">
                    ${sorted.map(ent => {
                      const sel  = selected.includes(ent);
-                     const name = this._hass.states[ent]?.attributes?.friendly_name
-                                  || ent.replace('camera.', '').replace(/_/g, ' ');
+                     const name = displayName(ent);
                      return `
                        <div class="check-item" data-id="${ent}" draggable="${sel}">
                          <div class="drag-handle">
