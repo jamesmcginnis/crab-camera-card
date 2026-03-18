@@ -506,7 +506,28 @@ class CrabCameraCard extends HTMLElement {
     }
   }
 
-  _onTap(id)       { this._openPopup(id); }
+  _onTap(id) {
+    // Refresh the still thumbnail immediately so the tile shows the latest frame
+    if (this._config?.thumbnail_mode === 'still') {
+      const img = this.shadowRoot?.getElementById(this._imgId(id));
+      if (img) {
+        const state = this._hass?.states[id];
+        const pic   = state?.attributes?.entity_picture;
+        const tok   = state?.attributes?.access_token || '';
+        const ts    = Date.now();
+        img.src = pic
+          ? `${pic}${pic.includes('?') ? '&' : '?'}_t=${ts}`
+          : `/api/camera_proxy/${id}?token=${tok}&_t=${ts}`;
+        // Also update the timestamp pill
+        const now  = new Date();
+        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
+        this._prevPictures[id]   = state?.attributes?.entity_picture || '';
+        this._prevTimestamps[id] = now;
+      }
+    }
+    this._openPopup(id);
+  }
   _onLongPress(id) {
     this.dispatchEvent(new CustomEvent('hass-more-info', {
       detail: { entityId: id }, bubbles: true, composed: true,
