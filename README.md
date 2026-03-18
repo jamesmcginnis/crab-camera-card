@@ -4,28 +4,23 @@
 
 A scrollable camera card for [Home Assistant](https://www.home-assistant.io/). Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
-## ➕ Add to HACS
+## Installation
+
+**Step 1 — Add the custom repository to HACS**
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=crab-camera-card&category=lovelace)
 
-> Click the button above, or follow the manual steps below.
 
-## Features
+**Step 2 — Install the card**
 
-- 📹 **Horizontal scrollable strip** — cameras overflow off-screen so you can swipe through them
-- 🖼️ **Still Image mode** — displays the latest snapshot, updated automatically whenever Home Assistant refreshes the camera
-- 🟢 **Live Feed mode** — renders a true live stream in each thumbnail using Home Assistant's own stream component (supports HLS, WebRTC and MJPEG)
-- 🔍 **Tap to view** — opens a full-screen popup with a live stream, mute toggle and fullscreen button
-- 📋 **Long press** — opens the native Home Assistant more-info dialog
-- ✨ **Visual Editor** — only live-capable cameras shown; drag to reorder; minimal inputs
-- 🟢 **Status dot** — green (live), yellow (still), red (offline) per camera
+Search for **Crab Camera Card** in HACS Frontend and click **Install**.
 
-## Installation via HACS
+**Step 3 — Add a resource (if not done automatically)**
 
-1. In HACS → **Frontend** → click the ⋮ menu → **Custom repositories**
-2. Add `https://github.com/jamesmcginnis/crab-camera-card` as a **Lovelace** repository
-3. Install **Crab Camera Card**
-4. Add the card resource, or let HACS do it automatically
+Go to **Settings → Dashboards → ⋮ → Resources** and add:
+```
+/hacsfiles/crab-camera-card/crab-camera-card.js
+```
 
 ## Manual Installation
 
@@ -36,6 +31,16 @@ A scrollable camera card for [Home Assistant](https://www.home-assistant.io/). D
    url: /local/crab-camera-card.js
    type: module
    ```
+
+## Features
+
+- 📹 **Horizontal scrollable strip** — cameras overflow off-screen so you can swipe through them
+- 🖼️ **Still Image mode** — displays the latest snapshot, updated automatically whenever Home Assistant refreshes the camera
+- 🟢 **Live Feed mode** — renders a true live stream in each thumbnail using Home Assistant's own stream component (supports HLS, WebRTC and MJPEG)
+- 🔍 **Tap to view** — opens a full-screen popup with a live stream, mute toggle and fullscreen button
+- 📋 **Long press** — opens the native Home Assistant more-info dialog
+- ✨ **Visual Editor** — only live-capable cameras shown; drag to reorder; minimal inputs
+- 🔴🟡🟢 **Status dot** — red (offline), yellow (still mode), green (live mode) per camera
 
 ## Configuration
 
