@@ -1,5 +1,5 @@
 /**
- * Crab Camera Card v1.4.0
+ * Crab Camera Card v1.5.0
  * Apple HomeKit-style scrollable camera card for Home Assistant
  * https://github.com/jamesmcginnis/crab-camera-card
  */
@@ -13,16 +13,10 @@ function isLiveCamera(hass, id) {
   const attrs      = state.attributes || {};
   const streamType = attrs.frontend_stream_type;
 
-  // Explicitly declared live stream
   if (streamType === 'hls' || streamType === 'web_rtc') return true;
-
-  // Any other explicit type (e.g. 'none') → not live
   if (streamType !== undefined && streamType !== null && streamType !== '') return false;
-
-  // Must have an access_token to be a real camera entity
   if (!attrs.access_token) return false;
 
-  // Exclude snapshot / recording / detection / clip cameras by entity ID or name
   const eid  = id.toLowerCase();
   const name = (attrs.friendly_name || '').toLowerCase();
   const PATTERNS = [
@@ -35,9 +29,9 @@ function isLiveCamera(hass, id) {
     if (eid.includes(p) || name.includes(p)) return false;
   }
   const WORDS = ['snapshot','recording','detection','thumbnail','clip','still'];
-  const nameTokens = name.split(/[\s_\-]+/);
+  const tokens = name.split(/[\s_\-]+/);
   for (const w of WORDS) {
-    if (nameTokens.includes(w)) return false;
+    if (tokens.includes(w)) return false;
   }
   return true;
 }
@@ -58,7 +52,6 @@ class CrabCameraCard extends HTMLElement {
     this._streamEl      = null;
     this._fsListeners   = null;
     this._pollTimer     = null;
-    // Track what we last rendered so we know when a real re-render is needed
     this._renderedMode  = null;
     this._renderedEnts  = null;
   }
@@ -77,7 +70,6 @@ class CrabCameraCard extends HTMLElement {
     };
   }
 
-  // ── setConfig: always store config, re-render if hass is ready ──
   setConfig(config) {
     this._config = {
       title:             'Cameras',
@@ -91,21 +83,21 @@ class CrabCameraCard extends HTMLElement {
     if (this._hass) this._render();
   }
 
-  // ── set hass: always update hass; re-render when needed ──────
   set hass(hass) {
     this._hass = hass;
 
-    const needsFullRender =
-      // Never rendered yet
+    const mode  = this._config?.thumbnail_mode || 'still';
+    const ents  = JSON.stringify(this._config?.entities || []);
+    const needsRender =
       !this._renderedMode ||
-      // thumbnail_mode changed (e.g. still ↔ live)
-      this._renderedMode !== (this._config?.thumbnail_mode || 'still') ||
-      // entity list changed
-      JSON.stringify(this._renderedEnts) !== JSON.stringify(this._config?.entities || []);
+      this._renderedMode !== mode ||
+      this._renderedEnts !== ents;
 
-    if (needsFullRender) {
+    if (needsRender) {
       this._render();
     } else {
+      // Push updated hass to any live stream tiles
+      this._updateLiveHass();
       this._updateDots();
     }
   }
@@ -114,20 +106,13 @@ class CrabCameraCard extends HTMLElement {
   disconnectedCallback() { this._stopTimers(); this._destroyPopup(); }
 
   // ── URL helpers ──────────────────────────────────────────────
-  // Single-frame proxy (cache-busted) — used for still thumbnails
   _proxyUrl(id) {
     const tok = this._hass?.states[id]?.attributes?.access_token || '';
     return `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
   }
-  // MJPEG stream — used for live thumbnails. The browser keeps this connection
-  // open and renders each arriving JPEG frame, giving a true live feed.
-  _streamUrl(id) {
-    const tok = this._hass?.states[id]?.attributes?.access_token || '';
-    return `/api/camera_proxy_stream/${id}?token=${tok}`;
-  }
-  _imgId(id) { return 'crab-img-' + id.replace(/[.\-]/g, '_'); }
+  _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
+  _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
 
-  // Dot colour
   _dotClass(online) {
     if (!online) return 'offline';
     return this._config?.thumbnail_mode === 'live' ? 'live' : 'still';
@@ -136,15 +121,13 @@ class CrabCameraCard extends HTMLElement {
   // ── Full render ──────────────────────────────────────────────
   _render() {
     if (!this._hass || !this._config) return;
-
     this._stopTimers();
 
     const { entities = [], show_title, title, thumbnail_mode } = this._config;
     const isLive = thumbnail_mode === 'live';
 
-    // Record what we rendered so hass updates don't trigger unnecessary re-renders
     this._renderedMode = thumbnail_mode;
-    this._renderedEnts = [...(entities)];
+    this._renderedEnts = JSON.stringify(entities);
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -195,14 +178,33 @@ class CrabCameraCard extends HTMLElement {
           transform: scale(0.94);
           box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         }
+
+        /* Still-mode image */
         .cam-img {
           width: 100%; height: 100%;
           object-fit: cover; display: block;
         }
+
+        /* Live-mode stream — ha-camera-stream fills the tile */
+        .cam-stream {
+          position: absolute; inset: 0;
+          width: 100%; height: 100%;
+          display: block;
+          pointer-events: none;
+          --ha-camera-stream-background: #111;
+        }
+        /* Force the internal video to fill and cover */
+        .cam-stream video,
+        .cam-stream::part(video) {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+        }
+
         .cam-gradient {
           position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
           background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%);
-          pointer-events: none;
+          pointer-events: none; z-index: 1;
         }
 
         .cam-dot {
@@ -252,12 +254,16 @@ class CrabCameraCard extends HTMLElement {
       </ha-card>`;
 
     if (entities.length > 0) {
+      // For live mode: mount ha-camera-stream elements now that the DOM exists
+      if (isLive) this._mountLiveStreams();
       this._bindTiles();
       this._startTimers();
     }
   }
 
-  // ── Tile HTML ────────────────────────────────────────────────
+  // ── Tile HTML skeleton ───────────────────────────────────────
+  // In live mode we render a placeholder div; _mountLiveStreams() fills it
+  // programmatically so we can set .hass and .stateObj as JS properties.
   _tileHtml(id, isLive) {
     const state    = this._hass?.states[id];
     const name     = state?.attributes?.friendly_name
@@ -276,18 +282,12 @@ class CrabCameraCard extends HTMLElement {
         <span class="cam-offline-msg">Camera Offline</span>
       </div>`;
     } else if (isLive) {
-      // LIVE MODE: point the <img> at the MJPEG proxy stream.
-      // The browser opens a persistent chunked connection and re-paints
-      // each arriving JPEG — no JS timer required, this is a true live feed.
-      inner = `<img class="cam-img" id="${this._imgId(id)}"
-        src="${this._streamUrl(id)}"
-        alt="${name}" draggable="false"
-        onerror="this.style.opacity='0.12'">`;
+      // Placeholder — ha-camera-stream is appended after innerHTML is set
+      inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"
+        style="position:absolute;inset:0;width:100%;height:100%;background:#111;"></div>`;
     } else {
-      // STILL MODE: single-frame proxy, refreshed by the interval timer.
       inner = `<img class="cam-img" id="${this._imgId(id)}"
-        src="${this._proxyUrl(id)}"
-        alt="${name}" draggable="false"
+        src="${this._proxyUrl(id)}" alt="${name}" draggable="false"
         onerror="this.style.opacity='0.12'">`;
     }
 
@@ -300,6 +300,84 @@ class CrabCameraCard extends HTMLElement {
         </div>
         ${showName ? `<div class="cam-name">${name}</div>` : ''}
       </div>`;
+  }
+
+  // ── Mount ha-camera-stream into each live tile slot ──────────
+  // Must be called AFTER innerHTML is set, so the slot divs exist in the DOM.
+  _mountLiveStreams() {
+    const entities = this._config?.entities || [];
+    entities.forEach(id => {
+      const state = this._hass?.states[id];
+      if (!state || state.state === 'unavailable') return;
+
+      const slot = this.shadowRoot.getElementById(this._streamId(id));
+      if (!slot) return;
+
+      const streamEl = document.createElement('ha-camera-stream');
+
+      // These MUST be set as JS properties, not HTML attributes
+      streamEl.hass     = this._hass;
+      streamEl.stateObj = state;
+
+      // Muted + autoplay so the browser allows it without user interaction
+      streamEl.setAttribute('muted', '');
+      streamEl.setAttribute('autoplay', '');
+      streamEl.setAttribute('playsinline', '');
+
+      // Style to fill the tile
+      streamEl.style.cssText = [
+        'position:absolute',
+        'inset:0',
+        'width:100%',
+        'height:100%',
+        'display:block',
+        'pointer-events:none',
+        '--ha-camera-stream-background:#111',
+      ].join(';');
+
+      slot.appendChild(streamEl);
+
+      // Once the inner <video> appears, force cover sizing
+      this._forceCoverVideo(streamEl);
+    });
+  }
+
+  // Recursively find <video> inside ha-camera-stream and force object-fit:cover
+  _forceCoverVideo(streamEl) {
+    const apply = vid => {
+      vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+      vid.muted = true;
+    };
+
+    const tryFind = () => {
+      let vid = streamEl.querySelector('video');
+      if (!vid && streamEl.shadowRoot) vid = streamEl.shadowRoot.querySelector('video');
+      if (!vid && streamEl.shadowRoot) {
+        for (const c of streamEl.shadowRoot.querySelectorAll('*')) {
+          if (c.shadowRoot) { vid = c.shadowRoot.querySelector('video'); if (vid) break; }
+        }
+      }
+      if (vid) { apply(vid); return true; }
+      return false;
+    };
+
+    if (tryFind()) return;
+    // Poll until the video element appears
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      if (tryFind() || n > 30) clearInterval(t);
+    }, 200);
+  }
+
+  // ── Push updated hass to live stream tiles (no re-render) ────
+  _updateLiveHass() {
+    if (this._config?.thumbnail_mode !== 'live') return;
+    (this._config?.entities || []).forEach(id => {
+      const slot = this.shadowRoot.getElementById(this._streamId(id));
+      const streamEl = slot?.querySelector('ha-camera-stream');
+      if (streamEl) streamEl.hass = this._hass;
+    });
   }
 
   // ── Tile gestures ────────────────────────────────────────────
@@ -339,12 +417,10 @@ class CrabCameraCard extends HTMLElement {
     }));
   }
 
-  // ── Refresh timers (still mode only) ────────────────────────
+  // ── Still refresh timers ─────────────────────────────────────
   _startTimers() {
     this._stopTimers();
-    // Live mode uses MJPEG stream URL directly — no timer needed.
-    if (this._config?.thumbnail_mode === 'live') return;
-
+    if (this._config?.thumbnail_mode === 'live') return; // live uses ha-camera-stream
     const ms = Math.max(2, parseInt(this._config?.refresh_interval) || 10) * 1000;
     (this._config?.entities || []).forEach(id => {
       this._refreshTimers[id] = setInterval(() => {
@@ -353,13 +429,12 @@ class CrabCameraCard extends HTMLElement {
       }, ms);
     });
   }
-
   _stopTimers() {
     Object.values(this._refreshTimers).forEach(clearInterval);
     this._refreshTimers = {};
   }
 
-  // ── Dot-only update (called on hass changes when no re-render needed) ─
+  // ── Dot update ───────────────────────────────────────────────
   _updateDots() {
     if (!this.shadowRoot) return;
     (this._config?.entities || []).forEach(id => {
@@ -467,9 +542,9 @@ class CrabCameraCard extends HTMLElement {
     document.body.appendChild(el);
     this._popupEl = el;
 
-    // Mount ha-camera-stream for true live video in popup
-    const sv      = el.querySelector('#crabSV');
-    const spinner = el.querySelector('#crabSpinner');
+    // Mount ha-camera-stream for the popup
+    const sv       = el.querySelector('#crabSV');
+    const spinner  = el.querySelector('#crabSpinner');
     const streamEl = document.createElement('ha-camera-stream');
     streamEl.hass     = this._hass;
     streamEl.stateObj = state;
@@ -481,7 +556,7 @@ class CrabCameraCard extends HTMLElement {
     let attempts = 0;
     this._pollTimer = setInterval(() => {
       attempts++;
-      const vid = this._getVideo();
+      const vid = this._findVideo(streamEl);
       if (vid) {
         clearInterval(this._pollTimer); this._pollTimer = null;
         vid.muted = true;
@@ -501,7 +576,7 @@ class CrabCameraCard extends HTMLElement {
 
     el.querySelector('#crabMuteBtn').addEventListener('click', () => {
       this._popupMuted = !this._popupMuted;
-      const vid = this._getVideo();
+      const vid = this._findVideo(this._streamEl);
       if (vid) vid.muted = this._popupMuted;
       this._syncMuteUI(el);
     });
@@ -528,15 +603,15 @@ class CrabCameraCard extends HTMLElement {
   }
 
   _enterFullscreen(el) {
-    const vid  = this._getVideo();
+    const vid  = this._findVideo(this._streamEl);
     const card = el.querySelector('#crabCard');
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
       return;
     }
-    if (vid?.webkitEnterFullscreen)     { vid.webkitEnterFullscreen(); return; }
-    if (vid?.requestFullscreen)         { vid.requestFullscreen().catch(() => this._fsCard(card)); return; }
-    if (vid?.webkitRequestFullscreen)   { vid.webkitRequestFullscreen(); return; }
+    if (vid?.webkitEnterFullscreen)   { vid.webkitEnterFullscreen(); return; }
+    if (vid?.requestFullscreen)       { vid.requestFullscreen().catch(() => this._fsCard(card)); return; }
+    if (vid?.webkitRequestFullscreen) { vid.webkitRequestFullscreen(); return; }
     this._fsCard(card);
   }
 
@@ -545,15 +620,16 @@ class CrabCameraCard extends HTMLElement {
     (card.requestFullscreen?.bind(card) || card.webkitRequestFullscreen?.bind(card))?.()?.catch(() => {});
   }
 
-  _getVideo() {
-    if (!this._streamEl) return null;
-    let v = this._streamEl.querySelector('video');
+  // Find <video> inside an ha-camera-stream element (light + shadow DOM)
+  _findVideo(streamEl) {
+    if (!streamEl) return null;
+    let v = streamEl.querySelector('video');
     if (v) return v;
-    v = this._streamEl.shadowRoot?.querySelector('video');
+    v = streamEl.shadowRoot?.querySelector('video');
     if (v) return v;
-    if (this._streamEl.shadowRoot) {
-      for (const child of this._streamEl.shadowRoot.querySelectorAll('*')) {
-        if (child.shadowRoot) { v = child.shadowRoot.querySelector('video'); if (v) return v; }
+    if (streamEl.shadowRoot) {
+      for (const c of streamEl.shadowRoot.querySelectorAll('*')) {
+        if (c.shadowRoot) { v = c.shadowRoot.querySelector('video'); if (v) return v; }
       }
     }
     return null;
@@ -627,7 +703,7 @@ class CrabCameraCardEditor extends HTMLElement {
     if (!this._hass || !this._config) return;
     this._initialized = true;
 
-    const selected = this._config.entities || [];
+    const selected    = this._config.entities || [];
     const liveCameras = Object.keys(this._hass.states)
       .filter(e => e.startsWith('camera.') && isLiveCamera(this._hass, e))
       .sort();
@@ -639,91 +715,55 @@ class CrabCameraCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; }
-        .container {
-          display: flex; flex-direction: column; gap: 20px; padding: 12px;
-          color: var(--primary-text-color);
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        }
-        .section-title {
-          font-size: 11px; font-weight: 700; text-transform: uppercase;
-          letter-spacing: .08em; color: #888; margin-bottom: 4px;
-        }
-        .card-block {
-          background: var(--card-background-color);
-          border: 1px solid rgba(255,255,255,.08);
-          border-radius: 12px; overflow: hidden;
-        }
-        .toggle-list { display: flex; flex-direction: column; }
-        .toggle-item {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,.06);
-          min-height: 52px; gap: 12px;
-        }
-        .toggle-item:last-child { border-bottom: none; }
-        .toggle-item > .lhs { flex: 1; min-width: 0; }
-        .toggle-label { font-size: 14px; font-weight: 500; }
-        .toggle-hint  { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 2px; line-height: 1.35; }
-        .toggle-switch { position: relative; width: 51px; height: 31px; flex-shrink: 0; }
-        .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
-        .toggle-track {
-          position: absolute; inset: 0; border-radius: 31px;
-          background: rgba(120,120,128,.32); cursor: pointer; transition: background .25s ease;
-        }
-        .toggle-track::after {
-          content: ''; position: absolute; width: 27px; height: 27px; border-radius: 50%;
-          background: #fff; top: 2px; left: 2px;
-          box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .25s ease;
-        }
-        .toggle-switch input:checked + .toggle-track { background: #34C759; }
-        .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); }
-        .seg-wrap { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
-        .seg-wrap:last-child { border-bottom: none; }
-        .seg-label { font-size: 14px; font-weight: 500; margin-bottom: 8px; }
-        .segmented { display: flex; background: rgba(118,118,128,.2); border-radius: 9px; padding: 2px; gap: 2px; }
-        .segmented input[type="radio"] { display: none; }
-        .segmented label {
-          flex: 1; text-align: center; padding: 8px 4px; font-size: 13px; font-weight: 500;
-          border-radius: 7px; cursor: pointer; color: var(--primary-text-color);
-          transition: all .2s ease; white-space: nowrap;
-        }
-        .segmented input[type="radio"]:checked + label {
-          background: #007AFF; color: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3);
-        }
-        .input-row { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
-        .input-row:last-child { border-bottom: none; }
-        .input-row label { font-size: 14px; font-weight: 500; display: block; margin-bottom: 7px; }
-        input[type="text"], input[type="number"] {
-          width: 100%; background: rgba(255,255,255,.07); color: var(--primary-text-color);
-          border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-          padding: 10px 12px; font-size: 14px; font-family: inherit; outline: none; transition: border-color .15s;
-        }
-        input[type="text"]:focus, input[type="number"]:focus { border-color: #007AFF; }
-        .num-inline { display: flex; align-items: center; gap: 10px; }
-        .num-inline input[type="number"] { width: 90px; text-align: center; }
-        .num-inline span { font-size: 13px; color: rgba(255,255,255,.45); }
-        .search-pad { padding: 10px 12px 0; }
-        .checklist { max-height: 300px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-        .check-item {
-          display: flex; align-items: center; padding: 10px 12px; gap: 10px;
-          border-bottom: 1px solid rgba(255,255,255,.06);
-          background: var(--card-background-color); min-height: 52px; touch-action: none;
-        }
-        .check-item:last-child { border-bottom: none; }
-        .dragging { opacity: .4; background: rgba(255,255,255,.04) !important; }
-        .drag-handle { cursor: grab; color: rgba(255,255,255,.28); display: flex; align-items: center; flex-shrink: 0; padding: 4px 2px; }
-        .cam-icon { flex-shrink: 0; color: rgba(255,255,255,.32); }
-        .ent-name { flex: 1; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-        .check-item .toggle-switch { width: 44px; height: 26px; flex-shrink: 0; }
-        .check-item .toggle-track  { border-radius: 26px; }
-        .check-item .toggle-track::after { width: 22px; height: 22px; }
-        .check-item .toggle-switch input:checked + .toggle-track::after { transform: translateX(18px); }
-        .no-cams { padding: 22px 16px; text-align: center; color: rgba(255,255,255,.35); font-size: 13px; line-height: 1.6; }
-        .dot-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 16px 13px; border-top: 1px solid rgba(255,255,255,.06); }
-        .dl { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,.42); }
-        .dd { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .dd.live    { background:#34C759; box-shadow:0 0 5px rgba(52,199,89,.7); }
-        .dd.still   { background:#FFD60A; box-shadow:0 0 5px rgba(255,214,10,.6); }
-        .dd.offline { background:#FF3B30; box-shadow:0 0 5px rgba(255,59,48,.6); }
+        .container { display:flex;flex-direction:column;gap:20px;padding:12px;color:var(--primary-text-color);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+        .section-title { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:4px; }
+        .card-block { background:var(--card-background-color);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden; }
+        .toggle-list { display:flex;flex-direction:column; }
+        .toggle-item { display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.06);min-height:52px;gap:12px; }
+        .toggle-item:last-child { border-bottom:none; }
+        .toggle-item>.lhs { flex:1;min-width:0; }
+        .toggle-label { font-size:14px;font-weight:500; }
+        .toggle-hint  { font-size:11px;color:rgba(255,255,255,.4);margin-top:2px;line-height:1.35; }
+        .toggle-switch { position:relative;width:51px;height:31px;flex-shrink:0; }
+        .toggle-switch input { opacity:0;width:0;height:0;position:absolute; }
+        .toggle-track { position:absolute;inset:0;border-radius:31px;background:rgba(120,120,128,.32);cursor:pointer;transition:background .25s ease; }
+        .toggle-track::after { content:'';position:absolute;width:27px;height:27px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .25s ease; }
+        .toggle-switch input:checked + .toggle-track { background:#34C759; }
+        .toggle-switch input:checked + .toggle-track::after { transform:translateX(20px); }
+        .seg-wrap { padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06); }
+        .seg-wrap:last-child { border-bottom:none; }
+        .seg-label { font-size:14px;font-weight:500;margin-bottom:8px; }
+        .segmented { display:flex;background:rgba(118,118,128,.2);border-radius:9px;padding:2px;gap:2px; }
+        .segmented input[type="radio"] { display:none; }
+        .segmented label { flex:1;text-align:center;padding:8px 4px;font-size:13px;font-weight:500;border-radius:7px;cursor:pointer;color:var(--primary-text-color);transition:all .2s ease;white-space:nowrap; }
+        .segmented input[type="radio"]:checked + label { background:#007AFF;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3); }
+        .input-row { padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06); }
+        .input-row:last-child { border-bottom:none; }
+        .input-row label { font-size:14px;font-weight:500;display:block;margin-bottom:7px; }
+        input[type="text"],input[type="number"] { width:100%;background:rgba(255,255,255,.07);color:var(--primary-text-color);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;transition:border-color .15s; }
+        input[type="text"]:focus,input[type="number"]:focus { border-color:#007AFF; }
+        .num-inline { display:flex;align-items:center;gap:10px; }
+        .num-inline input[type="number"] { width:90px;text-align:center; }
+        .num-inline span { font-size:13px;color:rgba(255,255,255,.45); }
+        .search-pad { padding:10px 12px 0; }
+        .checklist { max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch; }
+        .check-item { display:flex;align-items:center;padding:10px 12px;gap:10px;border-bottom:1px solid rgba(255,255,255,.06);background:var(--card-background-color);min-height:52px;touch-action:none; }
+        .check-item:last-child { border-bottom:none; }
+        .dragging { opacity:.4;background:rgba(255,255,255,.04) !important; }
+        .drag-handle { cursor:grab;color:rgba(255,255,255,.28);display:flex;align-items:center;flex-shrink:0;padding:4px 2px; }
+        .cam-icon { flex-shrink:0;color:rgba(255,255,255,.32); }
+        .ent-name { flex:1;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0; }
+        .check-item .toggle-switch { width:44px;height:26px;flex-shrink:0; }
+        .check-item .toggle-track  { border-radius:26px; }
+        .check-item .toggle-track::after { width:22px;height:22px; }
+        .check-item .toggle-switch input:checked + .toggle-track::after { transform:translateX(18px); }
+        .no-cams { padding:22px 16px;text-align:center;color:rgba(255,255,255,.35);font-size:13px;line-height:1.6; }
+        .dot-legend { display:flex;gap:16px;flex-wrap:wrap;padding:10px 16px 13px;border-top:1px solid rgba(255,255,255,.06); }
+        .dl { display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.42); }
+        .dd { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
+        .dd.live    { background:#34C759;box-shadow:0 0 5px rgba(52,199,89,.7); }
+        .dd.still   { background:#FFD60A;box-shadow:0 0 5px rgba(255,214,10,.6); }
+        .dd.offline { background:#FF3B30;box-shadow:0 0 5px rgba(255,59,48,.6); }
       </style>
 
       <div class="container">
@@ -735,9 +775,7 @@ class CrabCameraCardEditor extends HTMLElement {
               <input type="text" id="crabSearch" placeholder="Filter cameras…">
             </div>
             ${sorted.length === 0
-              ? `<div class="no-cams">No live-stream cameras found.<br>
-                   Only HLS, WebRTC and MJPEG cameras are shown.<br>
-                   Snapshot, recording and sensor cameras are excluded.</div>`
+              ? `<div class="no-cams">No live-stream cameras found.<br>Only HLS, WebRTC and MJPEG cameras are shown.<br>Snapshot, recording and sensor cameras are excluded.</div>`
               : `<div class="checklist" id="crabList">
                    ${sorted.map(ent => {
                      const sel  = selected.includes(ent);
@@ -830,17 +868,14 @@ class CrabCameraCardEditor extends HTMLElement {
     const r = this.shadowRoot;
     if (!r) return;
     const v = this._config, get = id => r.getElementById(id);
-
     if (get('crabTitle'))     get('crabTitle').value       = v.title || 'Cameras';
     if (get('crabShowTitle')) get('crabShowTitle').checked  = v.show_title !== false;
     if (get('crabShowNames')) get('crabShowNames').checked  = v.show_camera_names !== false;
     if (get('crabShowDot'))   get('crabShowDot').checked    = v.show_status_dot !== false;
     if (get('crabRefresh'))   get('crabRefresh').value      = v.refresh_interval || 10;
-
     const mode = v.thumbnail_mode || 'still';
     const mel  = get('thumb_' + mode);
     if (mel) mel.checked = true;
-
     const row = get('refreshRow');
     if (row) row.style.display = mode === 'live' ? 'none' : 'flex';
   }
@@ -853,8 +888,7 @@ class CrabCameraCardEditor extends HTMLElement {
       const cb = item.querySelector('input[type="checkbox"]');
       if (!cb) return;
       const sel = selected.includes(item.getAttribute('data-id'));
-      cb.checked = sel;
-      item.draggable = sel;
+      cb.checked = sel; item.draggable = sel;
     });
   }
 
