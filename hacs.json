@@ -1,8 +1,8 @@
 {
   "name": "Crab Camera Card",
-  "description": "Scrollable camera card for Home Assistant. Features live feeds, auto-refresh still images, a beautiful popup viewer with fullscreen and mute controls, and a clean visual editor.",
+  "description": "Scrollable camera card for Home Assistant with live feeds, still snapshots, and a full-screen popup viewer.",
   "render_readme": true,
   "domains": ["camera"],
   "iot_class": "local_polling",
-  "content_in_root": true
+  "filename": "crab-camera-card.js"
 }
