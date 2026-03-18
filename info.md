@@ -6,24 +6,24 @@ A scrollable camera card for Home Assistant. Display all your cameras in a horiz
 
 ---
 
-## Installation
+## Installation via HACS
 
-**Step 1 — Add the custom repository to HACS**
+**Step 1 — Add the custom repository**
 
-[![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=crab-camera-card&category=lovelace)
+Go to **HACS → Frontend → ⋮ → Custom repositories**, enter:
 
-> If the button doesn't open directly, go to **HACS → Frontend → ⋮ → Custom repositories**, paste `https://github.com/jamesmcginnis/crab-camera-card`, set the category to **Dashboard**, and click **Add**.
+- **Repository:** `https://github.com/jamesmcginnis/crab-camera-card`
+- **Category:** Dashboard
 
-**Step 2 — Install the card**
+Click **Add**, then close the dialog.
 
-Search for **Crab Camera Card** in HACS Frontend and click **Install**.
+**Step 2 — Install**
 
-**Step 3 — Add a resource (if not done automatically)**
+Search for **Crab Camera Card** in HACS Frontend and click **Download**.
 
-Go to **Settings → Dashboards → ⋮ → Resources** and add:
-```
-/hacsfiles/crab-camera-card/crab-camera-card.js
-```
+**Step 3 — Add the resource**
+
+Go to **Settings → Dashboards → ⋮ → Resources** and add `/hacsfiles/crab-camera-card/crab-camera-card.js` as a **JavaScript Module**.
 
 ---
 
