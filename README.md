@@ -2,9 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 
-WORK IN PROGRESS!!!!
-
-An Apple HomeKit-style scrollable camera card for [Home Assistant](https://www.home-assistant.io/).
+A scrollable camera card for [Home Assistant](https://www.home-assistant.io/). Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
 ## ➕ Add to HACS
 
@@ -14,14 +12,13 @@ An Apple HomeKit-style scrollable camera card for [Home Assistant](https://www.h
 
 ## Features
 
-- 📹 **Horizontal scrollable row** of camera thumbnails — cameras overflow off-screen just like the HomeKit app
-- 🟢 **Live Feed mode** — shows an MJPEG stream directly in each thumbnail
-- 🖼️ **Still Image mode** — shows the last snapshot, auto-refreshed at your chosen interval
-- 🔍 **Tap to view** — opens a beautiful Apple-style popup with a large live view
-- 🔇 **Mute toggle** and **fullscreen button** inside the popup
+- 📹 **Horizontal scrollable strip** — cameras overflow off-screen so you can swipe through them
+- 🖼️ **Still Image mode** — displays the latest snapshot, updated automatically whenever Home Assistant refreshes the camera
+- 🟢 **Live Feed mode** — renders a true live stream in each thumbnail using Home Assistant's own stream component (supports HLS, WebRTC and MJPEG)
+- 🔍 **Tap to view** — opens a full-screen popup with a live stream, mute toggle and fullscreen button
 - 📋 **Long press** — opens the native Home Assistant more-info dialog
-- ✨ **Visual Editor** — only shows camera entities; drag to reorder; minimal inputs
-- 🟢 **Status dot** — green/grey indicator per camera
+- ✨ **Visual Editor** — only live-capable cameras shown; drag to reorder; minimal inputs
+- 🟢 **Status dot** — green (live), yellow (still), red (offline) per camera
 
 ## Installation via HACS
 
@@ -50,7 +47,6 @@ entities:
   - camera.back_garden
   - camera.garage
 thumbnail_mode: still   # still | live
-refresh_interval: 10    # seconds (still mode only)
 show_title: true
 show_camera_names: true
 show_status_dot: true
@@ -61,24 +57,31 @@ show_status_dot: true
 | `entities`          | `[]`       | List of `camera.*` entity IDs |
 | `title`             | `Cameras`  | Card header text |
 | `show_title`        | `true`     | Show/hide the card title |
-| `thumbnail_mode`    | `still`    | `still` for snapshots, `live` for MJPEG stream |
-| `refresh_interval`  | `10`       | Seconds between still image refreshes (min 2) |
+| `thumbnail_mode`    | `still`    | `still` for snapshots, `live` for streaming thumbnails |
 | `show_camera_names` | `true`     | Show camera name below each tile |
-| `show_status_dot`   | `true`     | Show online/offline status indicator dot |
+| `show_status_dot`   | `true`     | Show status indicator dot on each tile |
 
 ## Usage
 
-| Gesture          | Action |
-|------------------|--------|
-| **Tap**          | Opens large popup with live view, mute and fullscreen controls |
-| **Long press**   | Opens native Home Assistant more-info dialog |
-| **Swipe**        | Scroll through cameras horizontally |
+| Gesture        | Action |
+|----------------|--------|
+| **Tap**        | Opens full-screen popup with live view, mute and fullscreen controls |
+| **Long press** | Opens native Home Assistant more-info dialog |
+| **Swipe**      | Scroll through cameras horizontally |
 
-## Notes on Live Streams
+## Status Dots
 
-- **Live Feed thumbnail mode** uses the camera's MJPEG proxy stream (`/api/camera_proxy_stream/`). This works well for most cameras (Frigate, generic MJPEG, etc.).
-- For cameras that use HLS or WebRTC natively (e.g. some Unifi/Reolink setups), the popup will attempt to display the MJPEG fallback stream. If your camera doesn't support MJPEG, **Still Image mode** is recommended for thumbnails.
-- The **popup viewer** always uses the MJPEG stream. For the best live view experience, use the long-press → more-info route for WebRTC/HLS cameras.
+| Colour | Meaning |
+|--------|---------|
+| 🟢 Green  | Live mode — camera online |
+| 🟡 Yellow | Still mode — camera online |
+| 🔴 Red    | Camera offline or unavailable |
+
+## Notes
+
+- **Still mode** images update automatically whenever Home Assistant refreshes the camera entity — no polling interval is needed or configurable.
+- **Live mode** thumbnails use `ha-camera-stream`, the same component HA uses internally, so HLS, WebRTC and MJPEG cameras all work without any extra configuration.
+- The visual editor only lists cameras that support live streaming. Snapshot-only, recording clip and sensor cameras are excluded automatically.
 
 ## License
 
