@@ -830,10 +830,10 @@ class CrabCameraCardEditor extends HTMLElement {
         input[type="text"]:focus { border-color:#007AFF; }
         .search-pad { padding:10px 12px 0; }
         .checklist { max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch; }
-        .check-item { display:flex;align-items:center;padding:10px 12px;gap:10px;border-bottom:1px solid rgba(255,255,255,.06);background:var(--card-background-color);min-height:52px;touch-action:none; }
+        .check-item { display:flex;align-items:center;padding:10px 12px;gap:10px;border-bottom:1px solid rgba(255,255,255,.06);background:var(--card-background-color);min-height:52px; }
         .check-item:last-child { border-bottom:none; }
         .dragging { opacity:.4;background:rgba(255,255,255,.04) !important; }
-        .drag-handle { cursor:grab;color:rgba(255,255,255,.28);display:flex;align-items:center;flex-shrink:0;padding:4px 2px; }
+        .drag-handle { cursor:grab;color:rgba(255,255,255,.28);display:flex;align-items:center;flex-shrink:0;padding:4px 2px;touch-action:none; }
         .cam-icon { flex-shrink:0;color:rgba(255,255,255,.32); }
         .ent-name { flex:1;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0; }
         .check-item .toggle-switch { width:44px;height:26px;flex-shrink:0; }
@@ -991,7 +991,9 @@ class CrabCameraCardEditor extends HTMLElement {
       dragged.classList.add('dragging');
     }, { passive: true });
     list.addEventListener('touchmove', e => {
-      if (!dragged) return; e.preventDefault();
+      // Only intercept scroll when a drag is actually in progress
+      if (!dragged) return;
+      e.preventDefault();
       const after = this._afterEl(list, e.touches[0].clientY);
       after == null ? list.appendChild(dragged) : list.insertBefore(dragged, after);
     }, { passive: false });
