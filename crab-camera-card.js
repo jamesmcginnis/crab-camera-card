@@ -511,25 +511,6 @@ class CrabCameraCard extends HTMLElement {
   }
 
   _onTap(id) {
-    // Refresh the still thumbnail immediately so the tile shows the latest frame
-    if (this._config?.thumbnail_mode === 'still') {
-      const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) {
-        const state = this._hass?.states[id];
-        const pic   = state?.attributes?.entity_picture;
-        const tok   = state?.attributes?.access_token || '';
-        const ts    = Date.now();
-        img.src = pic
-          ? `${pic}${pic.includes('?') ? '&' : '?'}_t=${ts}`
-          : `/api/camera_proxy/${id}?token=${tok}&_t=${ts}`;
-        // Also update the timestamp pill
-        const now  = new Date(state?.last_updated || Date.now());
-        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
-        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
-        this._prevPictures[id]   = state?.attributes?.entity_picture || '';
-        this._prevTimestamps[id] = now;
-      }
-    }
     this._openPopup(id);
   }
   _onLongPress(id) {
@@ -552,8 +533,39 @@ class CrabCameraCard extends HTMLElement {
   // ════════════════════════════════════════════════════════════
   //  POPUP
   // ════════════════════════════════════════════════════════════
+  // ── Force-refresh the still thumbnail for a tile immediately ──
+  _refreshStillTile(id) {
+    if (this._config?.thumbnail_mode !== 'still') return;
+    const state = this._hass?.states[id];
+    if (!state || state.state === 'unavailable') return;
+
+    const ts  = Date.now();
+    const pic = state.attributes?.entity_picture;
+    const tok = state.attributes?.access_token || '';
+    const src = pic
+      ? `${pic}${pic.includes('?') ? '&' : '?'}_t=${ts}`
+      : `/api/camera_proxy/${id}?token=${tok}&_t=${ts}`;
+
+    const img = this.shadowRoot?.getElementById(this._imgId(id));
+    if (img) {
+      const fresh = new Image();
+      fresh.onload = () => {
+        img.src = src;
+        img.style.opacity = '1';
+        const now  = new Date();
+        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
+        this._prevPictures[id]   = pic || src;
+        this._prevTimestamps[id] = now;
+      };
+      fresh.src = src;
+    }
+  }
+
   _openPopup(id) {
     this._destroyPopup();
+    // Grab a fresh snapshot for the card tile as the popup opens
+    this._refreshStillTile(id);
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
     const name = this._cleanName(
