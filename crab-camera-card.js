@@ -535,22 +535,18 @@ class CrabCameraCard extends HTMLElement {
   //  POPUP
   // ════════════════════════════════════════════════════════════
   // ── Request a fresh snapshot from HA then wait for the state update ──
-  // Calls the camera.snapshot service so HA itself captures a new frame and
-  // updates state.last_updated. _updateStillImages then picks it up naturally
-  // with the correct timestamp. We never fabricate a timestamp ourselves.
+  // Calls homeassistant.update_entity which tells HA to poll the camera for a
+  // new frame and update state.last_updated. _updateStillImages then picks it
+  // up naturally with the correct timestamp. No filesystem writes needed.
   _requestSnapshot(id) {
     if (this._config?.thumbnail_mode !== 'still') return;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
 
-    // Ask HA to grab a new frame — this will update state.last_updated and
-    // entity_picture, which _updateStillImages will detect and display.
-    this._hass.callService('camera', 'snapshot', {
+    this._hass.callService('homeassistant', 'update_entity', {
       entity_id: id,
-      filename:  `/tmp/crab_snapshot_${id.replace('.', '_')}.jpg`,
     }).catch(() => {
-      // snapshot service not supported (e.g. cloud cams) — fall back to
-      // force-busting the proxy URL while keeping the HA timestamp as-is
+      // update_entity not supported — fall back to force-busting the proxy URL
       this._forceProxyRefresh(id);
     });
   }
