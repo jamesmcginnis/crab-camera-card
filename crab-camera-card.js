@@ -107,8 +107,6 @@ class CrabCameraCard extends HTMLElement {
 
   // ── URL helpers ──────────────────────────────────────────────
   _stillUrl(id) {
-    const pic = this._hass?.states[id]?.attributes?.entity_picture;
-    if (pic) return pic;
     const tok = this._hass?.states[id]?.attributes?.access_token || '';
     return `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
   }
@@ -457,20 +455,18 @@ class CrabCameraCard extends HTMLElement {
       const now                = new Date(updated);
       this._prevTimestamps[id] = now;
 
-      // Build the freshest URL — prefer entity_picture but always cache-bust
-      const pic = state.attributes?.entity_picture;
-      let src;
-      if (pic) {
-        // Append or replace _t param so browser doesn't serve a cached copy
-        const sep = pic.includes('?') ? '&' : '?';
-        src = `${pic}${sep}_t=${Date.now()}`;
-      } else {
-        const tok = state.attributes?.access_token || '';
-        src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
-      }
+      // Always use the camera proxy directly — never entity_picture — so the
+      // browser can't serve a stale cached frame from a previous token/URL.
+      const tok = state.attributes?.access_token || '';
+      const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) { img.style.opacity = '1'; img.src = src; }
+      if (img) {
+        // Revoke any blob URL we previously set to free memory
+        if (img._crabBlobUrl) { URL.revokeObjectURL(img._crabBlobUrl); img._crabBlobUrl = null; }
+        img.style.opacity = '1';
+        img.src = src;
+      }
 
       // Update timestamp pill in-place
       const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
