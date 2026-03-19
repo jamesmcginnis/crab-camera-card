@@ -213,6 +213,11 @@ class CrabCameraCard extends HTMLElement {
           user-select: none; -webkit-user-select: none;
           pointer-events: none;
         }
+        .cam-img-shield {
+          position: absolute; inset: 0; z-index: 1;
+          -webkit-touch-callout: none;
+          user-select: none; -webkit-user-select: none;
+        }
 
         /* Live stream slot — suppress any internal text/labels from ha-camera-stream */
         .cam-stream-slot {
@@ -336,6 +341,7 @@ class CrabCameraCard extends HTMLElement {
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillUrl(id)}" alt="${name}" draggable="false"
           onerror="this.style.opacity='0.12'">
+        <div class="cam-img-shield"></div>
         ${tsTxt ? `<div class="cam-ts" id="${this._tsId(id)}">${tsTxt}</div>` : `<div class="cam-ts" id="${this._tsId(id)}" style="display:none"></div>`}`;
     }
 
@@ -488,6 +494,10 @@ class CrabCameraCard extends HTMLElement {
       });
       tile.addEventListener('pointercancel', cancel);
       tile.addEventListener('contextmenu', e => e.preventDefault());
+      tile.addEventListener('touchstart', e => {
+        // Prevent iOS image long-press share sheet
+        if (e.cancelable) e.preventDefault();
+      }, { passive: false });
     });
 
     const scroll = this.shadowRoot.getElementById('crabScroll');
