@@ -169,19 +169,16 @@ class CrabCameraCard extends HTMLElement {
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
         }
 
-        .scroll-outer {
-          padding-left: 12px;
-        }
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 12px 0 18px;
+          padding: 12px 12px 18px 12px;
+          box-sizing: content-box;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
         }
         .scroll-wrap::-webkit-scrollbar { display: none; }
-        .cam-tile:last-child { margin-right: 12px; }
 
         .scroll-fade { position: relative; }
         .scroll-fade::after {
@@ -297,10 +294,8 @@ class CrabCameraCard extends HTMLElement {
         ${show_title !== false && title ? `<div class="card-header">${title}</div>` : ''}
         ${entities.length === 0
           ? `<div class="empty-msg">No cameras configured — open the editor to add cameras.</div>`
-          : `<div class="scroll-outer">
-               <div class="scroll-wrap scroll-fade" id="crabScroll">
-                 ${entities.map(id => this._tileHtml(id, isLive)).join('')}
-               </div>
+          : `<div class="scroll-wrap scroll-fade" id="crabScroll">
+               ${entities.map(id => this._tileHtml(id, isLive)).join('')}
              </div>`}
       </ha-card>`;
 
