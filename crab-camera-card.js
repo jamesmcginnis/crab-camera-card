@@ -56,6 +56,7 @@ class CrabCameraCard extends HTMLElement {
     this._pollTimer      = null;
     this._renderedMode   = null;
     this._renderedEnts   = null;
+    this._snapshotLockout = new Set(); // entity ids locked out from _updateStillImages
   }
 
   static getConfigElement() { return document.createElement('crab-camera-card-editor'); }
@@ -446,6 +447,9 @@ class CrabCameraCard extends HTMLElement {
       const state = this._hass?.states[id];
       if (!state || state.state === 'unavailable') return;
 
+      // Skip this entity if _requestSnapshot has locked it out temporarily
+      if (this._snapshotLockout.has(id)) return;
+
       // Use last_updated as the change signal
       const updated = state.last_updated;
       if (!updated) return;
@@ -534,8 +538,6 @@ class CrabCameraCard extends HTMLElement {
   // Uses fetch() with credentials to pull the latest frame from the camera
   // proxy into a blob URL, then swaps the tile image. This works for all
   // camera types with no HA service calls or filesystem access needed.
-  // The timestamp is updated to now and _prevPictures is stamped with the
-  // current state.last_updated so _updateStillImages won't revert it.
   _requestSnapshot(id) {
     if (this._config?.thumbnail_mode !== 'still') return;
     const state = this._hass?.states[id];
@@ -547,32 +549,41 @@ class CrabCameraCard extends HTMLElement {
     const tok = state.attributes?.access_token || '';
     const url = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
 
+    // Lock this tile so _updateStillImages cannot overwrite it while we fetch
+    this._snapshotLockout.add(id);
+
     fetch(url, { credentials: 'same-origin' })
       .then(r => {
         if (!r.ok) throw new Error(r.status);
         return r.blob();
       })
       .then(blob => {
-        // Revoke any previous blob URL we created to avoid memory leaks
-        if (img._crabBlobUrl) URL.revokeObjectURL(img._crabBlobUrl);
-        const blobUrl = URL.createObjectURL(blob);
-        img._crabBlobUrl = blobUrl;
-        img.src = blobUrl;
-        img.style.opacity = '1';
+        // Re-check the element is still in the DOM (card may have re-rendered)
+        const liveImg = this.shadowRoot?.getElementById(this._imgId(id));
+        if (!liveImg) return;
 
-        // Stamp _prevPictures with current state.last_updated so
-        // _updateStillImages won't overwrite this tile on its next run
+        if (liveImg._crabBlobUrl) URL.revokeObjectURL(liveImg._crabBlobUrl);
+        const blobUrl = URL.createObjectURL(blob);
+        liveImg._crabBlobUrl = blobUrl;
+        liveImg.src   = blobUrl;
+        liveImg.style.opacity = '1';
+
+        const now = new Date();
+        this._prevTimestamps[id] = now;
+        // Also advance _prevPictures so when the lockout lifts, _updateStillImages
+        // won't immediately re-fetch with the old cached proxy URL
         this._prevPictures[id] = state.last_updated;
 
-        const now  = new Date();
-        this._prevTimestamps[id] = now;
         const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
         if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
       })
       .catch(() => {
-        // fetch failed — just bust the src URL directly as a last resort
         img.src = url;
-        delete this._prevPictures[id];
+      })
+      .finally(() => {
+        // Release the lockout after a short delay — long enough for hass update
+        // cycles to settle, short enough not to suppress legitimate HA updates
+        setTimeout(() => this._snapshotLockout.delete(id), 5000);
       });
   }
 
