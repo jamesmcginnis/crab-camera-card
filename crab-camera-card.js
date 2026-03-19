@@ -453,7 +453,7 @@ class CrabCameraCard extends HTMLElement {
       if (updated === this._prevPictures[id]) return; // no change since last check
 
       this._prevPictures[id]   = updated;
-      const now                = new Date();
+      const now                = new Date(updated);
       this._prevTimestamps[id] = now;
 
       // Build the freshest URL — prefer entity_picture but always cache-bust
@@ -523,7 +523,7 @@ class CrabCameraCard extends HTMLElement {
           ? `${pic}${pic.includes('?') ? '&' : '?'}_t=${ts}`
           : `/api/camera_proxy/${id}?token=${tok}&_t=${ts}`;
         // Also update the timestamp pill
-        const now  = new Date();
+        const now  = new Date(state?.last_updated || Date.now());
         const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
         if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
         this._prevPictures[id]   = state?.attributes?.entity_picture || '';
