@@ -61,6 +61,20 @@ class CrabCameraCard extends HTMLElement {
 
   static getConfigElement() { return document.createElement('crab-camera-card-editor'); }
 
+  // ── Persisted fetch-timestamp helpers ───────────────────────
+  // We store the last-fetched time in localStorage so it survives page reloads.
+  // Key: "crab_ts:<entity_id>"  Value: ISO timestamp string
+  _tsKey(id)       { return `crab_ts:${id}`; }
+  _saveTs(id, date) {
+    try { localStorage.setItem(this._tsKey(id), date.toISOString()); } catch (_) {}
+  }
+  _loadTs(id) {
+    try {
+      const v = localStorage.getItem(this._tsKey(id));
+      return v ? new Date(v) : null;
+    } catch (_) { return null; }
+  }
+
   static getStubConfig() {
     return {
       entities:          [],
@@ -148,12 +162,17 @@ class CrabCameraCard extends HTMLElement {
     this._prevPictures   = {};
     this._prevTimestamps = {};
 
-    // Seed initial timestamps from HA state so the first render shows a time
+    // Seed timestamps — prefer persisted fetch time, fall back to HA state time
     if (!isLive) {
       entities.forEach(id => {
-        const state = this._hass?.states[id];
-        if (state?.last_updated) {
-          this._prevTimestamps[id] = new Date(state.last_updated);
+        const persisted = this._loadTs(id);
+        if (persisted) {
+          this._prevTimestamps[id] = persisted;
+        } else {
+          const state = this._hass?.states[id];
+          if (state?.last_updated) {
+            this._prevTimestamps[id] = new Date(state.last_updated);
+          }
         }
       });
     }
@@ -458,6 +477,7 @@ class CrabCameraCard extends HTMLElement {
       this._prevPictures[id]   = updated;
       const now                = new Date(updated);
       this._prevTimestamps[id] = now;
+      this._saveTs(id, now);
 
       // Always use the camera proxy directly — never entity_picture — so the
       // browser can't serve a stale cached frame from a previous token/URL.
@@ -570,6 +590,7 @@ class CrabCameraCard extends HTMLElement {
 
         const now = new Date();
         this._prevTimestamps[id] = now;
+        this._saveTs(id, now);
         // Also advance _prevPictures so when the lockout lifts, _updateStillImages
         // won't immediately re-fetch with the old cached proxy URL
         this._prevPictures[id] = state.last_updated;
