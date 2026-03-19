@@ -534,35 +534,50 @@ class CrabCameraCard extends HTMLElement {
   // ════════════════════════════════════════════════════════════
   //  POPUP
   // ════════════════════════════════════════════════════════════
-  // ── Request a fresh snapshot from HA then wait for the state update ──
-  // Calls homeassistant.update_entity which tells HA to poll the camera for a
-  // new frame and update state.last_updated. _updateStillImages then picks it
-  // up naturally with the correct timestamp. No filesystem writes needed.
+  // ── Request a fresh snapshot when the popup closes ──
+  // Uses fetch() with credentials to pull the latest frame from the camera
+  // proxy into a blob URL, then swaps the tile image. This works for all
+  // camera types with no HA service calls or filesystem access needed.
+  // The timestamp is updated to now and _prevPictures is stamped with the
+  // current state.last_updated so _updateStillImages won't revert it.
   _requestSnapshot(id) {
     if (this._config?.thumbnail_mode !== 'still') return;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
 
-    this._hass.callService('homeassistant', 'update_entity', {
-      entity_id: id,
-    }).catch(() => {
-      // update_entity not supported — fall back to force-busting the proxy URL
-      this._forceProxyRefresh(id);
-    });
-  }
-
-  // Fallback: force the browser to re-fetch the proxy without touching timestamps.
-  // The displayed time stays as state.last_updated — never a fabricated value.
-  _forceProxyRefresh(id) {
-    const state = this._hass?.states[id];
-    if (!state) return;
     const img = this.shadowRoot?.getElementById(this._imgId(id));
     if (!img) return;
+
     const tok = state.attributes?.access_token || '';
-    img.src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
-    img.style.opacity = '1';
-    // Reset _prevPictures so _updateStillImages re-evaluates on next hass update
-    delete this._prevPictures[id];
+    const url = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
+
+    fetch(url, { credentials: 'same-origin' })
+      .then(r => {
+        if (!r.ok) throw new Error(r.status);
+        return r.blob();
+      })
+      .then(blob => {
+        // Revoke any previous blob URL we created to avoid memory leaks
+        if (img._crabBlobUrl) URL.revokeObjectURL(img._crabBlobUrl);
+        const blobUrl = URL.createObjectURL(blob);
+        img._crabBlobUrl = blobUrl;
+        img.src = blobUrl;
+        img.style.opacity = '1';
+
+        // Stamp _prevPictures with current state.last_updated so
+        // _updateStillImages won't overwrite this tile on its next run
+        this._prevPictures[id] = state.last_updated;
+
+        const now  = new Date();
+        this._prevTimestamps[id] = now;
+        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
+      })
+      .catch(() => {
+        // fetch failed — just bust the src URL directly as a last resort
+        img.src = url;
+        delete this._prevPictures[id];
+      });
   }
 
   _openPopup(id) {
