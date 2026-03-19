@@ -534,39 +534,43 @@ class CrabCameraCard extends HTMLElement {
   // ════════════════════════════════════════════════════════════
   //  POPUP
   // ════════════════════════════════════════════════════════════
-  // ── Force-refresh the still thumbnail for a tile immediately ──
-  // Fetches the latest frame directly from the camera proxy. We stamp
-  // _prevPictures with state.last_updated *before* the image loads so that
-  // _updateStillImages won't see it as a pending change and revert the
-  // timestamp back to the old value on its next run.
-  _refreshStillTile(id) {
+  // ── Request a fresh snapshot from HA then wait for the state update ──
+  // Calls the camera.snapshot service so HA itself captures a new frame and
+  // updates state.last_updated. _updateStillImages then picks it up naturally
+  // with the correct timestamp. We never fabricate a timestamp ourselves.
+  _requestSnapshot(id) {
     if (this._config?.thumbnail_mode !== 'still') return;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
 
+    // Ask HA to grab a new frame — this will update state.last_updated and
+    // entity_picture, which _updateStillImages will detect and display.
+    this._hass.callService('camera', 'snapshot', {
+      entity_id: id,
+      filename:  `/tmp/crab_snapshot_${id.replace('.', '_')}.jpg`,
+    }).catch(() => {
+      // snapshot service not supported (e.g. cloud cams) — fall back to
+      // force-busting the proxy URL while keeping the HA timestamp as-is
+      this._forceProxyRefresh(id);
+    });
+  }
+
+  // Fallback: force the browser to re-fetch the proxy without touching timestamps.
+  // The displayed time stays as state.last_updated — never a fabricated value.
+  _forceProxyRefresh(id) {
+    const state = this._hass?.states[id];
+    if (!state) return;
     const img = this.shadowRoot?.getElementById(this._imgId(id));
     if (!img) return;
-
-    // Stamp _prevPictures NOW so _updateStillImages ignores this state version
-    this._prevPictures[id] = state.last_updated;
-
-    // Always hit the camera proxy directly for the freshest frame
     const tok = state.attributes?.access_token || '';
-    const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
-    img.src = src;
+    img.src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
     img.style.opacity = '1';
-
-    // Update the timestamp pill immediately
-    const now  = new Date();
-    this._prevTimestamps[id] = now;
-    const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
-    if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
+    // Reset _prevPictures so _updateStillImages re-evaluates on next hass update
+    delete this._prevPictures[id];
   }
 
   _openPopup(id) {
     this._destroyPopup();
-    // Grab a fresh snapshot for the card tile as the popup opens
-    this._refreshStillTile(id);
     this._popupEntityId = id;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
@@ -771,11 +775,11 @@ class CrabCameraCard extends HTMLElement {
     this._popupEl?.remove();
     this._popupEl = null; this._streamEl = null;
     if (this._popupKey) { document.removeEventListener('keydown', this._popupKey); this._popupKey = null; }
-    // Refresh the tile snapshot once the live view closes
+    // Request a fresh snapshot once the live view closes
     if (this._popupEntityId) {
       const closedId = this._popupEntityId;
       this._popupEntityId = null;
-      setTimeout(() => this._refreshStillTile(closedId), 300);
+      setTimeout(() => this._requestSnapshot(closedId), 300);
     }
   }
 }
