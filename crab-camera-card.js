@@ -486,10 +486,24 @@ class CrabCameraCard extends HTMLElement {
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
       if (img) {
-        // Revoke any blob URL we previously set to free memory
         if (img._crabBlobUrl) { URL.revokeObjectURL(img._crabBlobUrl); img._crabBlobUrl = null; }
-        img.style.opacity = '1';
-        img.src = src;
+        // Fetch with no-cache so HA's proxy pulls a fresh frame from the camera
+        fetch(src, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        })
+          .then(r => r.ok ? r.blob() : Promise.reject())
+          .then(blob => {
+            const liveImg = this.shadowRoot?.getElementById(this._imgId(id));
+            if (!liveImg) return;
+            if (liveImg._crabBlobUrl) URL.revokeObjectURL(liveImg._crabBlobUrl);
+            const blobUrl = URL.createObjectURL(blob);
+            liveImg._crabBlobUrl = blobUrl;
+            liveImg.style.opacity = '1';
+            liveImg.src = blobUrl;
+          })
+          .catch(() => { img.style.opacity = '1'; img.src = src; });
       }
 
       // Update timestamp pill in-place
@@ -572,7 +586,13 @@ class CrabCameraCard extends HTMLElement {
     // Lock this tile so _updateStillImages cannot overwrite it while we fetch
     this._snapshotLockout.add(id);
 
-    fetch(url, { credentials: 'same-origin' })
+    // no-cache tells HA's own proxy to pull a fresh frame from the camera,
+    // not return whatever it last buffered
+    fetch(url, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    })
       .then(r => {
         if (!r.ok) throw new Error(r.status);
         return r.blob();
@@ -591,8 +611,6 @@ class CrabCameraCard extends HTMLElement {
         const now = new Date();
         this._prevTimestamps[id] = now;
         this._saveTs(id, now);
-        // Also advance _prevPictures so when the lockout lifts, _updateStillImages
-        // won't immediately re-fetch with the old cached proxy URL
         this._prevPictures[id] = state.last_updated;
 
         const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
@@ -602,8 +620,6 @@ class CrabCameraCard extends HTMLElement {
         img.src = url;
       })
       .finally(() => {
-        // Release the lockout after a short delay — long enough for hass update
-        // cycles to settle, short enough not to suppress legitimate HA updates
         setTimeout(() => this._snapshotLockout.delete(id), 5000);
       });
   }
