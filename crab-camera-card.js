@@ -217,6 +217,7 @@ class CrabCameraCard extends HTMLElement {
           position: absolute; inset: 0; z-index: 1;
           -webkit-touch-callout: none;
           user-select: none; -webkit-user-select: none;
+          pointer-events: none;
         }
 
         /* Live stream slot — suppress any internal text/labels from ha-camera-stream */
