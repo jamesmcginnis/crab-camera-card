@@ -494,10 +494,6 @@ class CrabCameraCard extends HTMLElement {
       });
       tile.addEventListener('pointercancel', cancel);
       tile.addEventListener('contextmenu', e => e.preventDefault());
-      tile.addEventListener('touchstart', e => {
-        // Prevent iOS image long-press share sheet
-        if (e.cancelable) e.preventDefault();
-      }, { passive: false });
     });
 
     const scroll = this.shadowRoot.getElementById('crabScroll');
