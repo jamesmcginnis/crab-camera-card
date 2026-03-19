@@ -49,31 +49,15 @@ class CrabCameraCard extends HTMLElement {
     this._prevTimestamps = {};  // last update time per camera
     this._popupEl        = null;
     this._popupKey       = null;
-    this._popupEntityId  = null;
     this._popupMuted     = true;
     this._streamEl       = null;
     this._fsListeners    = null;
     this._pollTimer      = null;
     this._renderedMode   = null;
     this._renderedEnts   = null;
-    this._snapshotLockout = new Set(); // entity ids locked out from _updateStillImages
   }
 
   static getConfigElement() { return document.createElement('crab-camera-card-editor'); }
-
-  // ── Persisted fetch-timestamp helpers ───────────────────────
-  // We store the last-fetched time in localStorage so it survives page reloads.
-  // Key: "crab_ts:<entity_id>"  Value: ISO timestamp string
-  _tsKey(id)       { return `crab_ts:${id}`; }
-  _saveTs(id, date) {
-    try { localStorage.setItem(this._tsKey(id), date.toISOString()); } catch (_) {}
-  }
-  _loadTs(id) {
-    try {
-      const v = localStorage.getItem(this._tsKey(id));
-      return v ? new Date(v) : null;
-    } catch (_) { return null; }
-  }
 
   static getStubConfig() {
     return {
@@ -162,17 +146,12 @@ class CrabCameraCard extends HTMLElement {
     this._prevPictures   = {};
     this._prevTimestamps = {};
 
-    // Seed timestamps — prefer persisted fetch time, fall back to HA state time
+    // Seed timestamps from HA state.last_updated
     if (!isLive) {
       entities.forEach(id => {
-        const persisted = this._loadTs(id);
-        if (persisted) {
-          this._prevTimestamps[id] = persisted;
-        } else {
-          const state = this._hass?.states[id];
-          if (state?.last_updated) {
-            this._prevTimestamps[id] = new Date(state.last_updated);
-          }
+        const state = this._hass?.states[id];
+        if (state?.last_updated) {
+          this._prevTimestamps[id] = new Date(state.last_updated);
         }
       });
     }
@@ -466,9 +445,6 @@ class CrabCameraCard extends HTMLElement {
       const state = this._hass?.states[id];
       if (!state || state.state === 'unavailable') return;
 
-      // Skip this entity if _requestSnapshot has locked it out temporarily
-      if (this._snapshotLockout.has(id)) return;
-
       // Use last_updated as the change signal
       const updated = state.last_updated;
       if (!updated) return;
@@ -477,7 +453,6 @@ class CrabCameraCard extends HTMLElement {
       this._prevPictures[id]   = updated;
       const now                = new Date(updated);
       this._prevTimestamps[id] = now;
-      this._saveTs(id, now);
 
       // Always use the camera proxy directly — never entity_picture — so the
       // browser can't serve a stale cached frame from a previous token/URL.
@@ -485,26 +460,7 @@ class CrabCameraCard extends HTMLElement {
       const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) {
-        if (img._crabBlobUrl) { URL.revokeObjectURL(img._crabBlobUrl); img._crabBlobUrl = null; }
-        // Fetch with no-cache so HA's proxy pulls a fresh frame from the camera
-        fetch(src, {
-          credentials: 'same-origin',
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' },
-        })
-          .then(r => r.ok ? r.blob() : Promise.reject())
-          .then(blob => {
-            const liveImg = this.shadowRoot?.getElementById(this._imgId(id));
-            if (!liveImg) return;
-            if (liveImg._crabBlobUrl) URL.revokeObjectURL(liveImg._crabBlobUrl);
-            const blobUrl = URL.createObjectURL(blob);
-            liveImg._crabBlobUrl = blobUrl;
-            liveImg.style.opacity = '1';
-            liveImg.src = blobUrl;
-          })
-          .catch(() => { img.style.opacity = '1'; img.src = src; });
-      }
+      if (img) { img.style.opacity = '1'; img.src = src; }
 
       // Update timestamp pill in-place
       const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
@@ -568,65 +524,8 @@ class CrabCameraCard extends HTMLElement {
   // ════════════════════════════════════════════════════════════
   //  POPUP
   // ════════════════════════════════════════════════════════════
-  // ── Request a fresh snapshot when the popup closes ──
-  // Uses fetch() with credentials to pull the latest frame from the camera
-  // proxy into a blob URL, then swaps the tile image. This works for all
-  // camera types with no HA service calls or filesystem access needed.
-  _requestSnapshot(id) {
-    if (this._config?.thumbnail_mode !== 'still') return;
-    const state = this._hass?.states[id];
-    if (!state || state.state === 'unavailable') return;
-
-    const img = this.shadowRoot?.getElementById(this._imgId(id));
-    if (!img) return;
-
-    const tok = state.attributes?.access_token || '';
-    const url = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
-
-    // Lock this tile so _updateStillImages cannot overwrite it while we fetch
-    this._snapshotLockout.add(id);
-
-    // no-cache tells HA's own proxy to pull a fresh frame from the camera,
-    // not return whatever it last buffered
-    fetch(url, {
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(r.status);
-        return r.blob();
-      })
-      .then(blob => {
-        // Re-check the element is still in the DOM (card may have re-rendered)
-        const liveImg = this.shadowRoot?.getElementById(this._imgId(id));
-        if (!liveImg) return;
-
-        if (liveImg._crabBlobUrl) URL.revokeObjectURL(liveImg._crabBlobUrl);
-        const blobUrl = URL.createObjectURL(blob);
-        liveImg._crabBlobUrl = blobUrl;
-        liveImg.src   = blobUrl;
-        liveImg.style.opacity = '1';
-
-        const now = new Date();
-        this._prevTimestamps[id] = now;
-        this._saveTs(id, now);
-        this._prevPictures[id] = state.last_updated;
-
-        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
-        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
-      })
-      .catch(() => {
-        img.src = url;
-      })
-      .finally(() => {
-        setTimeout(() => this._snapshotLockout.delete(id), 5000);
-      });
-  }
-
   _openPopup(id) {
     this._destroyPopup();
-    this._popupEntityId = id;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
     const name = this._cleanName(
@@ -830,12 +729,6 @@ class CrabCameraCard extends HTMLElement {
     this._popupEl?.remove();
     this._popupEl = null; this._streamEl = null;
     if (this._popupKey) { document.removeEventListener('keydown', this._popupKey); this._popupKey = null; }
-    // Request a fresh snapshot once the live view closes
-    if (this._popupEntityId) {
-      const closedId = this._popupEntityId;
-      this._popupEntityId = null;
-      setTimeout(() => this._requestSnapshot(closedId), 300);
-    }
   }
 }
 
