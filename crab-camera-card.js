@@ -49,6 +49,7 @@ class CrabCameraCard extends HTMLElement {
     this._prevTimestamps = {};  // last update time per camera
     this._popupEl        = null;
     this._popupKey       = null;
+    this._popupEntityId  = null;
     this._popupMuted     = true;
     this._streamEl       = null;
     this._fsListeners    = null;
@@ -548,17 +549,16 @@ class CrabCameraCard extends HTMLElement {
 
     const img = this.shadowRoot?.getElementById(this._imgId(id));
     if (img) {
-      const fresh = new Image();
-      fresh.onload = () => {
-        img.src = src;
-        img.style.opacity = '1';
+      img.src = src;
+      img.style.opacity = '1';
+      img.onload = () => {
         const now  = new Date();
         const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
         if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
         this._prevPictures[id]   = pic || src;
         this._prevTimestamps[id] = now;
+        img.onload = null;
       };
-      fresh.src = src;
     }
   }
 
@@ -566,6 +566,7 @@ class CrabCameraCard extends HTMLElement {
     this._destroyPopup();
     // Grab a fresh snapshot for the card tile as the popup opens
     this._refreshStillTile(id);
+    this._popupEntityId = id;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
     const name = this._cleanName(
@@ -769,6 +770,12 @@ class CrabCameraCard extends HTMLElement {
     this._popupEl?.remove();
     this._popupEl = null; this._streamEl = null;
     if (this._popupKey) { document.removeEventListener('keydown', this._popupKey); this._popupKey = null; }
+    // Refresh the tile snapshot once the live view closes
+    if (this._popupEntityId) {
+      const closedId = this._popupEntityId;
+      this._popupEntityId = null;
+      setTimeout(() => this._refreshStillTile(closedId), 300);
+    }
   }
 }
 
