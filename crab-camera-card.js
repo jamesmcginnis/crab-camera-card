@@ -159,7 +159,7 @@ class CrabCameraCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        ha-card { overflow: hidden; padding: 0; }
+        ha-card { overflow: visible; padding: 0; }
 
         .card-header {
           padding: 16px 16px 6px;
