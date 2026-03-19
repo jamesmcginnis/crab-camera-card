@@ -178,9 +178,7 @@ class CrabCameraCard extends HTMLElement {
           scrollbar-width: none;
         }
         .scroll-wrap::-webkit-scrollbar { display: none; }
-        /* Reliable left/right inset using flex-shrink:0 spacers */
-        .cam-tile:first-child { margin-left: 12px; }
-        .cam-tile:last-child  { margin-right: 12px; }
+
         .scroll-fade { position: relative; }
         .scroll-fade::after {
           content: ''; position: absolute;
@@ -296,7 +294,7 @@ class CrabCameraCard extends HTMLElement {
         ${entities.length === 0
           ? `<div class="empty-msg">No cameras configured — open the editor to add cameras.</div>`
           : `<div class="scroll-wrap scroll-fade" id="crabScroll">
-               ${entities.map(id => this._tileHtml(id, isLive)).join('')}
+               <div style="flex:0 0 6px;min-width:6px"></div>${entities.map(id => this._tileHtml(id, isLive)).join('')}<div style="flex:0 0 6px;min-width:6px"></div>
              </div>`}
       </ha-card>`;
 
