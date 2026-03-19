@@ -159,7 +159,7 @@ class CrabCameraCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        ha-card { overflow: visible; padding: 0; }
+        ha-card { overflow: hidden; padding: 0; }
 
         .card-header {
           padding: 16px 16px 6px;
@@ -172,13 +172,16 @@ class CrabCameraCard extends HTMLElement {
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 12px 12px 18px 12px;
-          box-sizing: content-box;
+          padding: 12px 12px 18px 18px;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
         }
         .scroll-wrap::-webkit-scrollbar { display: none; }
+        .tiles-inner {
+          display: flex; gap: 10px;
+          padding-left: 6px;
+        }
 
         .scroll-fade { position: relative; }
         .scroll-fade::after {
@@ -294,9 +297,7 @@ class CrabCameraCard extends HTMLElement {
         ${show_title !== false && title ? `<div class="card-header">${title}</div>` : ''}
         ${entities.length === 0
           ? `<div class="empty-msg">No cameras configured — open the editor to add cameras.</div>`
-          : `<div class="scroll-wrap scroll-fade" id="crabScroll">
-               ${entities.map(id => this._tileHtml(id, isLive)).join('')}
-             </div>`}
+          : `<div class="scroll-wrap scroll-fade" id="crabScroll"><div class="tiles-inner">${entities.map(id => this._tileHtml(id, isLive)).join('')}</div></div>`}
       </ha-card>`;
 
     if (entities.length > 0) {
