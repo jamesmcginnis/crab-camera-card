@@ -535,31 +535,32 @@ class CrabCameraCard extends HTMLElement {
   //  POPUP
   // ════════════════════════════════════════════════════════════
   // ── Force-refresh the still thumbnail for a tile immediately ──
+  // Fetches the latest frame directly from the camera proxy. We stamp
+  // _prevPictures with state.last_updated *before* the image loads so that
+  // _updateStillImages won't see it as a pending change and revert the
+  // timestamp back to the old value on its next run.
   _refreshStillTile(id) {
     if (this._config?.thumbnail_mode !== 'still') return;
     const state = this._hass?.states[id];
     if (!state || state.state === 'unavailable') return;
 
-    const ts  = Date.now();
-    const pic = state.attributes?.entity_picture;
-    const tok = state.attributes?.access_token || '';
-    const src = pic
-      ? `${pic}${pic.includes('?') ? '&' : '?'}_t=${ts}`
-      : `/api/camera_proxy/${id}?token=${tok}&_t=${ts}`;
-
     const img = this.shadowRoot?.getElementById(this._imgId(id));
-    if (img) {
-      img.src = src;
-      img.style.opacity = '1';
-      img.onload = () => {
-        const now  = new Date();
-        const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
-        if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
-        this._prevPictures[id]   = pic || src;
-        this._prevTimestamps[id] = now;
-        img.onload = null;
-      };
-    }
+    if (!img) return;
+
+    // Stamp _prevPictures NOW so _updateStillImages ignores this state version
+    this._prevPictures[id] = state.last_updated;
+
+    // Always hit the camera proxy directly for the freshest frame
+    const tok = state.attributes?.access_token || '';
+    const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
+    img.src = src;
+    img.style.opacity = '1';
+
+    // Update the timestamp pill immediately
+    const now  = new Date();
+    this._prevTimestamps[id] = now;
+    const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+    if (tsEl) { tsEl.textContent = this._fmtTime(now); tsEl.style.display = ''; }
   }
 
   _openPopup(id) {
