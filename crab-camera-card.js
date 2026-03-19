@@ -209,6 +209,9 @@ class CrabCameraCard extends HTMLElement {
         .cam-img {
           width: 100%; height: 100%;
           object-fit: cover; display: block;
+          -webkit-touch-callout: none;
+          user-select: none; -webkit-user-select: none;
+          pointer-events: none;
         }
 
         /* Live stream slot — suppress any internal text/labels from ha-camera-stream */
@@ -484,6 +487,7 @@ class CrabCameraCard extends HTMLElement {
         if (timer) { cancel(); if (!fired) this._onTap(id); }
       });
       tile.addEventListener('pointercancel', cancel);
+      tile.addEventListener('contextmenu', e => e.preventDefault());
     });
 
     const scroll = this.shadowRoot.getElementById('crabScroll');
