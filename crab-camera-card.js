@@ -146,12 +146,16 @@ class CrabCameraCard extends HTMLElement {
     this._prevPictures   = {};
     this._prevTimestamps = {};
 
-    // Seed timestamps from HA state.last_updated
+    // Seed timestamps and change-detection keys from HA state.last_updated.
+    // Both stores must be seeded together: _prevTimestamps drives the displayed
+    // pill, and _prevPictures is the guard in _updateStillImages that prevents
+    // a redundant re-fetch on the very first hass update after a render.
     if (!isLive) {
       entities.forEach(id => {
         const state = this._hass?.states[id];
         if (state?.last_updated) {
           this._prevTimestamps[id] = new Date(state.last_updated);
+          this._prevPictures[id]   = state.last_updated; // same token used in _updateStillImages
         }
       });
     }
@@ -172,7 +176,7 @@ class CrabCameraCard extends HTMLElement {
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 18px 12px 18px 0;
+          padding: 12px 12px 18px 0;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
