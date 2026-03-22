@@ -155,7 +155,7 @@ class CrabCameraCard extends HTMLElement {
         const state = this._hass?.states[id];
         if (state?.last_updated) {
           this._prevTimestamps[id] = new Date(state.last_updated);
-          this._prevPictures[id]   = state.last_updated; // same token used in _updateStillImages
+          this._prevPictures[id]   = state.last_updated;
         }
       });
     }
@@ -166,7 +166,7 @@ class CrabCameraCard extends HTMLElement {
         ha-card { overflow: hidden; padding: 0; }
 
         .card-header {
-          padding: 16px 16px 0;
+          padding: 16px 16px 6px;
           font-size: 17px; font-weight: 600;
           color: var(--primary-text-color);
           letter-spacing: -0.3px;
@@ -176,12 +176,14 @@ class CrabCameraCard extends HTMLElement {
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 12px 12px 12px 0;
+          padding: 12px 12px 0 0;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
         }
         .scroll-wrap::-webkit-scrollbar { display: none; }
+
+        .card-bottom-pad { height: 12px; }
         .scroll-fade { position: relative; }
         .scroll-fade::after {
           content: ''; position: absolute;
@@ -306,6 +308,7 @@ class CrabCameraCard extends HTMLElement {
         ${entities.length === 0
           ? `<div class="empty-msg">No cameras configured — open the editor to add cameras.</div>`
           : `<div class="scroll-wrap scroll-fade" id="crabScroll">${entities.map(id => this._tileHtml(id, isLive)).join('')}</div>`}
+        <div class="card-bottom-pad"></div>
       </ha-card>`;
 
     if (entities.length > 0) {
