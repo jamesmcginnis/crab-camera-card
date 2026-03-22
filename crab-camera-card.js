@@ -166,7 +166,7 @@ class CrabCameraCard extends HTMLElement {
         ha-card { overflow: hidden; padding: 0; }
 
         .card-header {
-          padding: 16px 16px 6px;
+          padding: 16px 16px 0;
           font-size: 17px; font-weight: 600;
           color: var(--primary-text-color);
           letter-spacing: -0.3px;
@@ -176,7 +176,7 @@ class CrabCameraCard extends HTMLElement {
         .scroll-wrap {
           display: flex; gap: 10px;
           overflow-x: auto; overflow-y: hidden;
-          padding: 12px 12px 18px 0;
+          padding: 12px 12px 12px 0;
           -webkit-overflow-scrolling: touch;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
