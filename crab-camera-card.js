@@ -46,7 +46,6 @@ class CrabCameraCard extends HTMLElement {
     this._hass           = null;
     this._config         = null;
     this._prevPictures   = {};  // last-seen entity_picture per camera
-    this._prevTimestamps = {};  // last update time per camera
     this._popupEl        = null;
     this._popupKey       = null;
     this._popupMuted     = true;
@@ -113,16 +112,10 @@ class CrabCameraCard extends HTMLElement {
 
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
-  _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
   _dotClass(online) {
     if (!online) return 'offline';
     return this._config?.thumbnail_mode === 'live' ? 'live' : 'still';
-  }
-
-  // Format a Date as "H:MM AM/PM"
-  _fmtTime(date) {
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
   // Strip common suffixes/prefixes that camera integrations append to friendly names,
@@ -145,18 +138,14 @@ class CrabCameraCard extends HTMLElement {
     this._renderedMode   = thumbnail_mode;
     this._renderedEnts   = JSON.stringify(entities);
     this._prevPictures   = {};
-    this._prevTimestamps = {};
 
-    // Seed timestamps and change-detection keys from HA state.last_updated.
-    // Both stores must be seeded together: _prevTimestamps drives the displayed
-    // pill, and _prevPictures is the guard in _updateStillImages that prevents
-    // a redundant re-fetch on the very first hass update after a render.
+    // Seed _prevPictures so the first hass update after render doesn't
+    // redundantly re-fetch images that haven't changed.
     if (!isLive) {
       entities.forEach(id => {
         const state = this._hass?.states[id];
         if (state?.last_updated) {
-          this._prevTimestamps[id] = new Date(state.last_updated);
-          this._prevPictures[id]   = state.last_updated;
+          this._prevPictures[id] = state.last_updated;
         }
       });
     }
@@ -244,21 +233,6 @@ class CrabCameraCard extends HTMLElement {
           --ha-camera-stream-controls-display: none;
         }
 
-        /* Timestamp pill — top-left corner, still mode only */
-        .cam-ts {
-          position: absolute; top: 7px; left: 7px; z-index: 4;
-          background: rgba(0,0,0,.52);
-          backdrop-filter: blur(6px);
-          -webkit-backdrop-filter: blur(6px);
-          color: rgba(255,255,255,.82);
-          font-size: 9px; font-weight: 600;
-          letter-spacing: .03em;
-          padding: 2px 5px;
-          border-radius: 4px;
-          pointer-events: none;
-          font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
-        }
-
         .cam-gradient {
           position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
           background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%);
@@ -339,15 +313,12 @@ class CrabCameraCard extends HTMLElement {
       // No timestamp pill in live mode (stream is real-time).
       inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"></div>`;
     } else {
-      // Still mode — single-frame image with a timestamp pill top-left.
-      const ts  = this._prevTimestamps[id];
-      const tsTxt = ts ? this._fmtTime(ts) : '';
+      // Still mode — single-frame image.
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillUrl(id)}" alt="${name}" draggable="false"
           onerror="this.style.opacity='0.12'">
-        <div class="cam-img-shield"></div>
-        ${tsTxt ? `<div class="cam-ts" id="${this._tsId(id)}">${tsTxt}</div>` : `<div class="cam-ts" id="${this._tsId(id)}" style="display:none"></div>`}`;
+        <div class="cam-img-shield"></div>`;
     }
 
     return `
@@ -466,54 +437,30 @@ class CrabCameraCard extends HTMLElement {
       const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) {
-        img.style.opacity = '1';
-        // Stamp the timestamp only once the browser has actually received the
-        // image — this is the true "time of snapshot" visible to the user.
-        const tsId = this._tsId(id);
-        img.onload = () => {
-          const tsEl = this.shadowRoot?.getElementById(tsId);
-          if (tsEl) {
-            tsEl.textContent   = this._fmtTime(new Date());
-            tsEl.style.display = '';
-          }
-        };
-        img.src = src;
-      }
+      if (img) { img.style.opacity = '1'; img.src = src; }
     });
   }
 
   // ── Swap tile content when a camera goes offline after initial render ───
-  // The tile HTML is static after _render(). If a camera goes from online→offline
-  // the <img> element stays but fails to load, showing the browser's broken-image
-  // icon (the blue/white question mark). This method detects that transition and
-  // replaces the broken image with the proper "Camera Offline" overlay, and
-  // restores the image when the camera comes back online.
   _updateOfflineStates() {
     (this._config?.entities || []).forEach(id => {
       const tile = this.shadowRoot?.querySelector(`.cam-tile[data-entity="${id}"]`);
       if (!tile) return;
       const wrap = tile.querySelector('.cam-wrap');
       if (!wrap) return;
-
-      const state   = this._hass?.states[id];
-      const online  = state && state.state !== 'unavailable';
+      const state         = this._hass?.states[id];
+      const online        = state && state.state !== 'unavailable';
       const hasOfflineDiv = !!wrap.querySelector('.cam-offline');
-      const hasImg        = !!wrap.querySelector('.cam-img');
-
       if (!online && !hasOfflineDiv) {
-        // Camera just went offline — replace image content with offline overlay
         wrap.querySelector('.cam-img')?.remove();
         wrap.querySelector('.cam-img-shield')?.remove();
         wrap.querySelector('.cam-ts')?.remove();
         wrap.querySelector('.cam-gradient')?.remove();
-
         const div = document.createElement('div');
         div.className = 'cam-offline';
-        div.innerHTML = '<span class="cam-offline-msg">Camera Offline</span>';
+        div.innerHTML = '<span class=\'cam-offline-msg\'>Camera Offline</span>';
         wrap.insertBefore(div, wrap.firstChild);
       } else if (online && hasOfflineDiv) {
-        // Camera came back online — full re-render to restore image tile
         this._render();
       }
     });
