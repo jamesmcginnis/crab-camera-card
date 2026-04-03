@@ -289,8 +289,10 @@ class CrabCameraCard extends HTMLElement {
           background: rgba(12,12,12,.93);
         }
         .cam-offline-msg {
-          font-size: 10px; font-weight: 700; color: #FF3B30;
-          letter-spacing: .05em;
+          font-size: 11px; font-weight: 700; color: #FF3B30;
+          letter-spacing: .04em; text-align: center;
+          padding: 0 10px; line-height: 1.4;
+          word-break: break-word;
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
         }
 
@@ -329,9 +331,6 @@ class CrabCameraCard extends HTMLElement {
     if (!state || !online) {
       // Offline overlay — no timestamp, no stream
       inner = `<div class="cam-offline">
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="#FF3B30" style="opacity:.6">
-          <path d="M21 6.5l-4-4-1.27 1.27L21 9.77V6.5zM3.27 2 2 3.27l4.73 4.73A1 1 0 0 0 6 9v6a1 1 0 0 0 1 1h1.73L12 19.73V14l3.12 3.12A5 5 0 0 1 13 18.1v2.06c1.38-.32 2.63-.96 3.69-1.82L19.73 21 21 19.73l-9-9L3.27 2zM12 4 9.91 6.09 12 8.18V4z"/>
-        </svg>
         <span class="cam-offline-msg">Camera Offline</span>
       </div>`;
     } else if (isLive) {
@@ -459,7 +458,7 @@ class CrabCameraCard extends HTMLElement {
       if (updated === this._prevPictures[id]) return; // no change since last check
 
       this._prevPictures[id]   = updated;
-      const now                = new Date(updated);
+      const now                = new Date();   // wall-clock time of this fetch
       this._prevTimestamps[id] = now;
 
       // Always use the camera proxy directly — never entity_picture — so the
