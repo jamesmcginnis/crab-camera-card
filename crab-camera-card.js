@@ -98,6 +98,7 @@ class CrabCameraCard extends HTMLElement {
       this._updateLiveHass();
       this._updateStillImages();
       this._updateDots();
+      this._updateOfflineStates();
     }
   }
 
@@ -457,9 +458,7 @@ class CrabCameraCard extends HTMLElement {
       if (!updated) return;
       if (updated === this._prevPictures[id]) return; // no change since last check
 
-      this._prevPictures[id]   = updated;
-      const now                = new Date();   // wall-clock time of this fetch
-      this._prevTimestamps[id] = now;
+      this._prevPictures[id] = updated;
 
       // Always use the camera proxy directly — never entity_picture — so the
       // browser can't serve a stale cached frame from a previous token/URL.
@@ -467,13 +466,55 @@ class CrabCameraCard extends HTMLElement {
       const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) { img.style.opacity = '1'; img.src = src; }
+      if (img) {
+        img.style.opacity = '1';
+        // Stamp the timestamp only once the browser has actually received the
+        // image — this is the true "time of snapshot" visible to the user.
+        const tsId = this._tsId(id);
+        img.onload = () => {
+          const tsEl = this.shadowRoot?.getElementById(tsId);
+          if (tsEl) {
+            tsEl.textContent   = this._fmtTime(new Date());
+            tsEl.style.display = '';
+          }
+        };
+        img.src = src;
+      }
+    });
+  }
 
-      // Update timestamp pill in-place
-      const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
-      if (tsEl) {
-        tsEl.textContent   = this._fmtTime(now);
-        tsEl.style.display = '';
+  // ── Swap tile content when a camera goes offline after initial render ───
+  // The tile HTML is static after _render(). If a camera goes from online→offline
+  // the <img> element stays but fails to load, showing the browser's broken-image
+  // icon (the blue/white question mark). This method detects that transition and
+  // replaces the broken image with the proper "Camera Offline" overlay, and
+  // restores the image when the camera comes back online.
+  _updateOfflineStates() {
+    (this._config?.entities || []).forEach(id => {
+      const tile = this.shadowRoot?.querySelector(`.cam-tile[data-entity="${id}"]`);
+      if (!tile) return;
+      const wrap = tile.querySelector('.cam-wrap');
+      if (!wrap) return;
+
+      const state   = this._hass?.states[id];
+      const online  = state && state.state !== 'unavailable';
+      const hasOfflineDiv = !!wrap.querySelector('.cam-offline');
+      const hasImg        = !!wrap.querySelector('.cam-img');
+
+      if (!online && !hasOfflineDiv) {
+        // Camera just went offline — replace image content with offline overlay
+        wrap.querySelector('.cam-img')?.remove();
+        wrap.querySelector('.cam-img-shield')?.remove();
+        wrap.querySelector('.cam-ts')?.remove();
+        wrap.querySelector('.cam-gradient')?.remove();
+
+        const div = document.createElement('div');
+        div.className = 'cam-offline';
+        div.innerHTML = '<span class="cam-offline-msg">Camera Offline</span>';
+        wrap.insertBefore(div, wrap.firstChild);
+      } else if (online && hasOfflineDiv) {
+        // Camera came back online — full re-render to restore image tile
+        this._render();
       }
     });
   }
