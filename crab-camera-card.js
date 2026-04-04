@@ -112,6 +112,42 @@ class CrabCameraCard extends HTMLElement {
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
 
+  // ── Auto-detect a companion still/recording entity for a live camera ─
+  // e.g. camera.back_yard_camara → camera.back_yard_camara_last_recording
+  // Returns the companion entity ID if found, otherwise null.
+  _findStillEntity(liveId) {
+    const states = this._hass?.states || {};
+    const SUFFIXES = [
+      '_last_recording', '_last_snapshot', '_snapshot',
+      '_still', '_thumbnail', '_recording', '_clip', '_detection',
+    ];
+    for (const s of SUFFIXES) {
+      const candidate = liveId + s;
+      if (states[candidate]) return candidate;
+    }
+    // Fallback: any camera.* starting with liveId + '_' that is not itself a live camera
+    const prefix = liveId + '_';
+    const match  = Object.keys(states).find(
+      e => e.startsWith(prefix) && !isLiveCamera(this._hass, e)
+    );
+    return match || null;
+  }
+
+  // ── Resolve the best still image URL for a tile ──────────────
+  // Prefers the companion entity's entity_picture (HA changes this URL each
+  // time a new recording arrives, so it acts as a natural cache-buster).
+  // Falls back to the live camera's own proxy URL with a manual cache-bust.
+  _stillSrc(liveId) {
+    const stillId = this._findStillEntity(liveId);
+    const state   = stillId
+      ? (this._hass?.states[stillId])
+      : (this._hass?.states[liveId]);
+    const pic = state?.attributes?.entity_picture;
+    if (pic) return pic.startsWith('http') ? pic : `${location.origin}${pic}`;
+    const tok = this._hass?.states[liveId]?.attributes?.access_token || '';
+    return `/api/camera_proxy/${liveId}?token=${tok}&_t=${Date.now()}`;
+  }
+
   _dotClass(online) {
     if (!online) return 'offline';
     return this._config?.thumbnail_mode === 'live' ? 'live' : 'still';
@@ -140,10 +176,17 @@ class CrabCameraCard extends HTMLElement {
 
     // Seed _prevPictures so the first hass update after render doesn't
     // redundantly re-fetch images that haven't changed.
+    // Use the same change key as _updateStillImages: companion entity_picture + last_updated.
     if (!isLive) {
       entities.forEach(id => {
-        const state = this._hass?.states[id];
-        if (state?.last_updated) this._prevPictures[id] = state.last_updated;
+        const stillId    = this._findStillEntity(id);
+        const watchState = stillId
+          ? this._hass?.states[stillId]
+          : this._hass?.states[id];
+        if (watchState) {
+          const pic = watchState.attributes?.entity_picture || '';
+          this._prevPictures[id] = `${watchState.last_updated || ''}::${pic}`;
+        }
       });
     }
 
@@ -315,7 +358,7 @@ class CrabCameraCard extends HTMLElement {
       // with the "Camera Offline" overlay so no broken-image icon is ever shown.
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
-          src="${this._stillUrl(id)}" alt="${name}" draggable="false"
+          src="${this._stillSrc(id)}" alt="${name}" draggable="false"
           onerror="var w=this.closest('.cam-wrap');if(w){w.innerHTML='<div class=\'cam-offline\'><span class=\'cam-offline-msg\'>Camera Offline</span></div>';}">
         <div class="cam-img-shield"></div>`;
     }
@@ -413,28 +456,28 @@ class CrabCameraCard extends HTMLElement {
   }
 
   // ── Update still images whenever HA refreshes the camera state ──
-  // We track state.last_updated rather than entity_picture URL because
-  // many cameras keep the same URL but HA fires a state update with a new
-  // frame. On every state change we force-refresh the img with a cache-bust
-  // param so the browser fetches the latest frame regardless of URL equality.
+  // For each live camera tile we check its companion still/recording entity
+  // (e.g. camera.back_yard_camara_last_recording).  HA updates that entity's
+  // entity_picture URL whenever a new recording arrives, so we use it as both
+  // the change signal and the image source.  If no companion exists we fall
+  // back to watching last_updated on the live entity itself.
   _updateStillImages() {
     if (this._config?.thumbnail_mode !== 'still') return;
     (this._config?.entities || []).forEach(id => {
-      const state = this._hass?.states[id];
-      if (!state || state.state === 'unavailable') return;
+      const liveState = this._hass?.states[id];
+      if (!liveState || liveState.state === 'unavailable') return;
 
-      // Use last_updated as the change signal
-      const updated = state.last_updated;
-      if (!updated) return;
-      if (updated === this._prevPictures[id]) return; // no change since last check
+      const stillId    = this._findStillEntity(id);
+      const watchState = stillId ? this._hass?.states[stillId] : liveState;
+      if (!watchState) return;
 
-      this._prevPictures[id] = updated;
+      // Change key: companion entity_picture URL + last_updated
+      const pic       = watchState.attributes?.entity_picture || '';
+      const changeKey = `${watchState.last_updated || ''}::${pic}`;
+      if (changeKey === this._prevPictures[id]) return;
+      this._prevPictures[id] = changeKey;
 
-      // Always use the camera proxy directly — never entity_picture — so the
-      // browser can't serve a stale cached frame from a previous token/URL.
-      const tok = state.attributes?.access_token || '';
-      const src = `/api/camera_proxy/${id}?token=${tok}&_t=${Date.now()}`;
-
+      const src = this._stillSrc(id);
       const img = this.shadowRoot?.getElementById(this._imgId(id));
       if (img) { img.style.opacity = '1'; img.src = src; }
     });
