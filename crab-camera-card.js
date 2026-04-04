@@ -97,6 +97,7 @@ class CrabCameraCard extends HTMLElement {
       this._updateLiveHass();
       this._updateStillImages();
       this._updateDots();
+      this._updateOfflineStates();
     }
   }
 
@@ -143,7 +144,9 @@ class CrabCameraCard extends HTMLElement {
     if (!isLive) {
       entities.forEach(id => {
         const state = this._hass?.states[id];
-        if (state?.last_updated) this._prevPictures[id] = state.last_updated;
+        if (state?.last_updated) {
+          this._prevPictures[id] = state.last_updated;
+        }
       });
     }
 
@@ -311,12 +314,10 @@ class CrabCameraCard extends HTMLElement {
       inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"></div>`;
     } else {
       // Still mode — single-frame image.
-      // onerror: if the image fails to load for any reason, replace the tile
-      // with the "Camera Offline" overlay so no broken-image icon is ever shown.
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillUrl(id)}" alt="${name}" draggable="false"
-          onerror="var w=this.closest('.cam-wrap');if(w){w.innerHTML='<div class=\'cam-offline\'><span class=\'cam-offline-msg\'>Camera Offline</span></div>';}">
+          onerror="this.style.opacity='0.12'">
         <div class="cam-img-shield"></div>`;
     }
 
@@ -437,6 +438,31 @@ class CrabCameraCard extends HTMLElement {
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
       if (img) { img.style.opacity = '1'; img.src = src; }
+    });
+  }
+
+  // ── Swap tile content when a camera goes offline after initial render ───
+  _updateOfflineStates() {
+    (this._config?.entities || []).forEach(id => {
+      const tile = this.shadowRoot?.querySelector(`.cam-tile[data-entity="${id}"]`);
+      if (!tile) return;
+      const wrap = tile.querySelector('.cam-wrap');
+      if (!wrap) return;
+      const state         = this._hass?.states[id];
+      const online        = state && state.state !== 'unavailable';
+      const hasOfflineDiv = !!wrap.querySelector('.cam-offline');
+      if (!online && !hasOfflineDiv) {
+        wrap.querySelector('.cam-img')?.remove();
+        wrap.querySelector('.cam-img-shield')?.remove();
+        wrap.querySelector('.cam-ts')?.remove();
+        wrap.querySelector('.cam-gradient')?.remove();
+        const div = document.createElement('div');
+        div.className = 'cam-offline';
+        div.innerHTML = '<span class=\'cam-offline-msg\'>Camera Offline</span>';
+        wrap.insertBefore(div, wrap.firstChild);
+      } else if (online && hasOfflineDiv) {
+        this._render();
+      }
     });
   }
 
