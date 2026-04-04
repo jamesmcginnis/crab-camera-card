@@ -46,6 +46,7 @@ class CrabCameraCard extends HTMLElement {
     this._hass           = null;
     this._config         = null;
     this._prevPictures   = {};  // last-seen entity_picture per camera
+    this._prevTimestamps = {};  // last update time per camera
     this._popupEl        = null;
     this._popupKey       = null;
     this._popupMuted     = true;
@@ -97,7 +98,6 @@ class CrabCameraCard extends HTMLElement {
       this._updateLiveHass();
       this._updateStillImages();
       this._updateDots();
-      this._updateOfflineStates();
     }
   }
 
@@ -112,10 +112,16 @@ class CrabCameraCard extends HTMLElement {
 
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
+  _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
   _dotClass(online) {
     if (!online) return 'offline';
     return this._config?.thumbnail_mode === 'live' ? 'live' : 'still';
+  }
+
+  // Format a Date as "H:MM AM/PM"
+  _fmtTime(date) {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
   // Strip common suffixes/prefixes that camera integrations append to friendly names,
@@ -138,14 +144,18 @@ class CrabCameraCard extends HTMLElement {
     this._renderedMode   = thumbnail_mode;
     this._renderedEnts   = JSON.stringify(entities);
     this._prevPictures   = {};
+    this._prevTimestamps = {};
 
-    // Seed _prevPictures so the first hass update after render doesn't
-    // redundantly re-fetch images that haven't changed.
+    // Seed timestamps and change-detection keys from HA state.last_updated.
+    // Both stores must be seeded together: _prevTimestamps drives the displayed
+    // pill, and _prevPictures is the guard in _updateStillImages that prevents
+    // a redundant re-fetch on the very first hass update after a render.
     if (!isLive) {
       entities.forEach(id => {
         const state = this._hass?.states[id];
         if (state?.last_updated) {
-          this._prevPictures[id] = state.last_updated;
+          this._prevTimestamps[id] = new Date(state.last_updated);
+          this._prevPictures[id]   = state.last_updated;
         }
       });
     }
@@ -233,6 +243,21 @@ class CrabCameraCard extends HTMLElement {
           --ha-camera-stream-controls-display: none;
         }
 
+        /* Timestamp pill — top-left corner, still mode only */
+        .cam-ts {
+          position: absolute; top: 7px; left: 7px; z-index: 4;
+          background: rgba(0,0,0,.52);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          color: rgba(255,255,255,.82);
+          font-size: 9px; font-weight: 600;
+          letter-spacing: .03em;
+          padding: 2px 5px;
+          border-radius: 4px;
+          pointer-events: none;
+          font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+        }
+
         .cam-gradient {
           position: absolute; bottom: 0; left: 0; right: 0; height: 55%;
           background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%);
@@ -313,12 +338,15 @@ class CrabCameraCard extends HTMLElement {
       // No timestamp pill in live mode (stream is real-time).
       inner = `<div class="cam-stream-slot" id="${this._streamId(id)}"></div>`;
     } else {
-      // Still mode — single-frame image.
+      // Still mode — single-frame image with a timestamp pill top-left.
+      const ts  = this._prevTimestamps[id];
+      const tsTxt = ts ? this._fmtTime(ts) : '';
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillUrl(id)}" alt="${name}" draggable="false"
           onerror="this.style.opacity='0.12'">
-        <div class="cam-img-shield"></div>`;
+        <div class="cam-img-shield"></div>
+        ${tsTxt ? `<div class="cam-ts" id="${this._tsId(id)}">${tsTxt}</div>` : `<div class="cam-ts" id="${this._tsId(id)}" style="display:none"></div>`}`;
     }
 
     return `
@@ -429,7 +457,9 @@ class CrabCameraCard extends HTMLElement {
       if (!updated) return;
       if (updated === this._prevPictures[id]) return; // no change since last check
 
-      this._prevPictures[id] = updated;
+      this._prevPictures[id]   = updated;
+      const now                = new Date();   // wall-clock time of this fetch
+      this._prevTimestamps[id] = now;
 
       // Always use the camera proxy directly — never entity_picture — so the
       // browser can't serve a stale cached frame from a previous token/URL.
@@ -438,30 +468,12 @@ class CrabCameraCard extends HTMLElement {
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
       if (img) { img.style.opacity = '1'; img.src = src; }
-    });
-  }
 
-  // ── Swap tile content when a camera goes offline after initial render ───
-  _updateOfflineStates() {
-    (this._config?.entities || []).forEach(id => {
-      const tile = this.shadowRoot?.querySelector(`.cam-tile[data-entity="${id}"]`);
-      if (!tile) return;
-      const wrap = tile.querySelector('.cam-wrap');
-      if (!wrap) return;
-      const state         = this._hass?.states[id];
-      const online        = state && state.state !== 'unavailable';
-      const hasOfflineDiv = !!wrap.querySelector('.cam-offline');
-      if (!online && !hasOfflineDiv) {
-        wrap.querySelector('.cam-img')?.remove();
-        wrap.querySelector('.cam-img-shield')?.remove();
-        wrap.querySelector('.cam-ts')?.remove();
-        wrap.querySelector('.cam-gradient')?.remove();
-        const div = document.createElement('div');
-        div.className = 'cam-offline';
-        div.innerHTML = '<span class=\'cam-offline-msg\'>Camera Offline</span>';
-        wrap.insertBefore(div, wrap.firstChild);
-      } else if (online && hasOfflineDiv) {
-        this._render();
+      // Update timestamp pill in-place
+      const tsEl = this.shadowRoot?.getElementById(this._tsId(id));
+      if (tsEl) {
+        tsEl.textContent   = this._fmtTime(now);
+        tsEl.style.display = '';
       }
     });
   }
