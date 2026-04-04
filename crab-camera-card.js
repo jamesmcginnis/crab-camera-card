@@ -52,6 +52,7 @@ class CrabCameraCard extends HTMLElement {
     this._streamEl       = null;
     this._fsListeners    = null;
     this._pollTimer      = null;
+    this._refreshTimer   = null;
     this._renderedMode   = null;
     this._renderedEnts   = null;
   }
@@ -66,6 +67,7 @@ class CrabCameraCard extends HTMLElement {
       thumbnail_mode:    'still',
       show_camera_names: true,
       show_status_dot:   true,
+      refresh_interval:  30,
     };
   }
 
@@ -76,6 +78,7 @@ class CrabCameraCard extends HTMLElement {
       thumbnail_mode:    'still',
       show_camera_names: true,
       show_status_dot:   true,
+      refresh_interval:  30,
       ...config,
     };
     if (this._hass) this._render();
@@ -101,7 +104,7 @@ class CrabCameraCard extends HTMLElement {
   }
 
   connectedCallback()    { /* updates driven by hass */ }
-  disconnectedCallback() { this._destroyPopup(); }
+  disconnectedCallback() { this._stopRefreshTimer(); this._destroyPopup(); }
 
   // ── URL helpers ──────────────────────────────────────────────
   _stillUrl(id) {
@@ -112,40 +115,48 @@ class CrabCameraCard extends HTMLElement {
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
 
-  // ── Auto-detect a companion still/recording entity for a live camera ─
-  // e.g. camera.back_yard_camara → camera.back_yard_camara_last_recording
-  // Returns the companion entity ID if found, otherwise null.
+  // ── Find companion still/recording entity for a live camera ─────
+  // Example: camera.back_yard_camara_live_view  →  camera.back_yard_camara_last_recording
+  // Strategy: strip any known live suffix to get the shared base name,
+  // then probe for known still suffixes on that base.
   _findStillEntity(liveId) {
     const states = this._hass?.states || {};
-    const SUFFIXES = [
+    const LIVE_SUFFIXES  = ['_live_view', '_live_feed', '_live_stream', '_live', '_stream'];
+    const STILL_SUFFIXES = [
       '_last_recording', '_last_snapshot', '_snapshot',
       '_still', '_thumbnail', '_recording', '_clip', '_detection',
     ];
-    for (const s of SUFFIXES) {
-      const candidate = liveId + s;
-      if (states[candidate]) return candidate;
+
+    // 1. Try still suffixes directly on the live id (simple naming schemes)
+    for (const ss of STILL_SUFFIXES) {
+      if (states[liveId + ss]) return liveId + ss;
     }
-    // Fallback: any camera.* starting with liveId + '_' that is not itself a live camera
-    const prefix = liveId + '_';
-    const match  = Object.keys(states).find(
-      e => e.startsWith(prefix) && !isLiveCamera(this._hass, e)
-    );
-    return match || null;
+
+    // 2. Strip live suffix → base, then probe still suffixes
+    for (const ls of LIVE_SUFFIXES) {
+      if (liveId.endsWith(ls)) {
+        const base = liveId.slice(0, -ls.length);
+        for (const ss of STILL_SUFFIXES) {
+          if (states[base + ss]) return base + ss;
+        }
+        break; // matched a live suffix, no point continuing
+      }
+    }
+
+    return null;
   }
 
-  // ── Resolve the best still image URL for a tile ──────────────
-  // Prefers the companion entity's entity_picture (HA changes this URL each
-  // time a new recording arrives, so it acts as a natural cache-buster).
-  // Falls back to the live camera's own proxy URL with a manual cache-bust.
+  // ── Build the still image src for a tile ─────────────────────
+  // Uses the companion still entity's camera proxy URL (with cache-bust)
+  // so the browser always fetches a fresh frame from HA.
   _stillSrc(liveId) {
     const stillId = this._findStillEntity(liveId);
-    const state   = stillId
-      ? (this._hass?.states[stillId])
-      : (this._hass?.states[liveId]);
-    const pic = state?.attributes?.entity_picture;
-    if (pic) return pic.startsWith('http') ? pic : `${location.origin}${pic}`;
-    const tok = this._hass?.states[liveId]?.attributes?.access_token || '';
-    return `/api/camera_proxy/${liveId}?token=${tok}&_t=${Date.now()}`;
+    if (stillId) {
+      const tok = this._hass?.states[stillId]?.attributes?.access_token || '';
+      return `/api/camera_proxy/${stillId}?token=${tok}&_t=${Date.now()}`;
+    }
+    // Fallback: use the live camera's own proxy
+    return this._stillUrl(liveId);
   }
 
   _dotClass(online) {
@@ -176,17 +187,14 @@ class CrabCameraCard extends HTMLElement {
 
     // Seed _prevPictures so the first hass update after render doesn't
     // redundantly re-fetch images that haven't changed.
-    // Use the same change key as _updateStillImages: companion entity_picture + last_updated.
+    // Watch the companion still entity (if found) rather than the live camera.
     if (!isLive) {
       entities.forEach(id => {
         const stillId    = this._findStillEntity(id);
         const watchState = stillId
           ? this._hass?.states[stillId]
           : this._hass?.states[id];
-        if (watchState) {
-          const pic = watchState.attributes?.entity_picture || '';
-          this._prevPictures[id] = `${watchState.last_updated || ''}::${pic}`;
-        }
+        if (watchState?.last_updated) this._prevPictures[id] = watchState.last_updated;
       });
     }
 
@@ -329,6 +337,7 @@ class CrabCameraCard extends HTMLElement {
       if (isLive) this._mountLiveStreams();
       this._bindTiles();
     }
+    this._startRefreshTimer();
   }
 
   // ── Tile HTML ────────────────────────────────────────────────
@@ -455,12 +464,10 @@ class CrabCameraCard extends HTMLElement {
     });
   }
 
-  // ── Update still images whenever HA refreshes the camera state ──
-  // For each live camera tile we check its companion still/recording entity
-  // (e.g. camera.back_yard_camara_last_recording).  HA updates that entity's
-  // entity_picture URL whenever a new recording arrives, so we use it as both
-  // the change signal and the image source.  If no companion exists we fall
-  // back to watching last_updated on the live entity itself.
+  // ── Update still images when HA state changes ───────────────
+  // Watches the companion still/recording entity (e.g. _last_recording) rather
+  // than the live camera entity itself, because HA fires state updates on the
+  // recording entity when a new clip arrives.
   _updateStillImages() {
     if (this._config?.thumbnail_mode !== 'still') return;
     (this._config?.entities || []).forEach(id => {
@@ -471,15 +478,40 @@ class CrabCameraCard extends HTMLElement {
       const watchState = stillId ? this._hass?.states[stillId] : liveState;
       if (!watchState) return;
 
-      // Change key: companion entity_picture URL + last_updated
-      const pic       = watchState.attributes?.entity_picture || '';
-      const changeKey = `${watchState.last_updated || ''}::${pic}`;
-      if (changeKey === this._prevPictures[id]) return;
-      this._prevPictures[id] = changeKey;
+      const updated = watchState.last_updated;
+      if (!updated || updated === this._prevPictures[id]) return;
+      this._prevPictures[id] = updated;
 
-      const src = this._stillSrc(id);
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) { img.style.opacity = '1'; img.src = src; }
+      if (img) { img.style.opacity = '1'; img.src = this._stillSrc(id); }
+    });
+  }
+
+  // ── Polling refresh timer ────────────────────────────────────
+  _startRefreshTimer() {
+    this._stopRefreshTimer();
+    if (this._config?.thumbnail_mode !== 'still') return;
+    const secs = Math.max(5, parseInt(this._config?.refresh_interval, 10) || 30);
+    this._refreshTimer = setInterval(() => this._forceRefreshStillImages(), secs * 1000);
+  }
+
+  _stopRefreshTimer() {
+    if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
+  }
+
+  // Force-refresh every still tile regardless of state change detection.
+  // Called by the polling timer and immediately after the popup closes.
+  _forceRefreshStillImages() {
+    if (this._config?.thumbnail_mode !== 'still') return;
+    (this._config?.entities || []).forEach(id => {
+      const liveState = this._hass?.states[id];
+      if (!liveState || liveState.state === 'unavailable') return;
+      const img = this.shadowRoot?.getElementById(this._imgId(id));
+      if (img) {
+        // Clear the change key so the next HA state update also triggers naturally
+        this._prevPictures[id] = null;
+        img.src = this._stillSrc(id);
+      }
     });
   }
 
@@ -742,6 +774,9 @@ class CrabCameraCard extends HTMLElement {
     this._popupEl?.remove();
     this._popupEl = null; this._streamEl = null;
     if (this._popupKey) { document.removeEventListener('keydown', this._popupKey); this._popupKey = null; }
+    // Refresh still thumbnails after closing the live popup so the latest
+    // recording frame is shown without waiting for the next polling tick.
+    this._forceRefreshStillImages();
   }
 }
 
@@ -935,6 +970,13 @@ class CrabCameraCardEditor extends HTMLElement {
                 <label for="thumb_live">Live Feed</label>
               </div>
             </div>
+            <div class="input-row">
+              <label for="crabRefresh">Still Image Refresh Interval (seconds)</label>
+              <input type="number" id="crabRefresh" min="5" max="3600" step="5" placeholder="30">
+              <div style="font-size:11px;color:rgba(255,255,255,.35);margin-top:5px;line-height:1.5">
+                How often to poll for a new last-recording image. Min 5s. Also refreshes immediately after viewing the live feed.
+              </div>
+            </div>
           </div>
         </div>
 
@@ -956,6 +998,7 @@ class CrabCameraCardEditor extends HTMLElement {
     if (get('crabShowDot'))   get('crabShowDot').checked    = v.show_status_dot !== false;
     const mel = get('thumb_' + (v.thumbnail_mode || 'still'));
     if (mel) mel.checked = true;
+    if (get('crabRefresh')) get('crabRefresh').value = v.refresh_interval ?? 30;
   }
 
   _syncCheckboxes() {
@@ -1053,6 +1096,11 @@ class CrabCameraCardEditor extends HTMLElement {
       r.getElementById('thumb_' + val)?.addEventListener('change', e => {
         if (e.target.checked) this._fire('thumbnail_mode', val);
       });
+    });
+    r.getElementById('crabRefresh')?.addEventListener('change', e => {
+      const val = Math.max(5, parseInt(e.target.value, 10) || 30);
+      e.target.value = val;
+      this._fire('refresh_interval', val);
     });
   }
 }
