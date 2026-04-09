@@ -114,6 +114,21 @@ class CrabCameraCard extends HTMLElement {
 
   _imgId(id)    { return 'crab-img-'    + id.replace(/[.\-]/g, '_'); }
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
+  _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
+
+  // Return a short "HH:MM" time string for when the still image was last updated.
+  // Watches the companion still entity if one exists, otherwise the live entity itself.
+  _getLastUpdatedTime(id) {
+    const stillId    = this._findStillEntity(id);
+    const watchState = stillId
+      ? this._hass?.states[stillId]
+      : this._hass?.states[id];
+    const raw = watchState?.last_updated;
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d)) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   // ── Find companion still/recording entity for a live camera ─────
   // Example: camera.back_yard_camara_live_view  →  camera.back_yard_camara_last_recording
@@ -319,6 +334,22 @@ class CrabCameraCard extends HTMLElement {
           font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
         }
 
+        .cam-timestamp {
+          position: absolute; top: 7px; right: 7px;
+          z-index: 4; pointer-events: none;
+          background: rgba(0,0,0,0.52);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          color: rgba(255,255,255,0.92);
+          font-size: 10px; font-weight: 600;
+          letter-spacing: 0.02em;
+          padding: 2px 7px;
+          border-radius: 20px;
+          font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+          white-space: nowrap;
+          border: 0.5px solid rgba(255,255,255,0.13);
+        }
+
         .empty-msg {
           padding: 28px 16px; text-align: center;
           color: var(--secondary-text-color, rgba(255,255,255,.4));
@@ -365,11 +396,13 @@ class CrabCameraCard extends HTMLElement {
       // Still mode — single-frame image.
       // onerror: if the image fails to load for any reason, replace the tile
       // with the "Camera Offline" overlay so no broken-image icon is ever shown.
+      const ts = this._getLastUpdatedTime(id);
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillSrc(id)}" alt="${name}" draggable="false"
           onerror="var w=this.closest('.cam-wrap');if(w){w.innerHTML='<div class=\'cam-offline\'><span class=\'cam-offline-msg\'>Camera Offline</span></div>';}">
-        <div class="cam-img-shield"></div>`;
+        <div class="cam-img-shield"></div>
+        ${ts ? `<div class="cam-timestamp" id="${this._tsId(id)}">${ts}</div>` : `<div class="cam-timestamp" id="${this._tsId(id)}" style="display:none"></div>`}`;
     }
 
     return `
@@ -484,6 +517,13 @@ class CrabCameraCard extends HTMLElement {
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
       if (img) { img.style.opacity = '1'; img.src = this._stillSrc(id); }
+
+      // Update the timestamp pill to reflect the new last_updated time
+      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
+      if (tsPill) {
+        const t = this._getLastUpdatedTime(id);
+        if (t) { tsPill.textContent = t; tsPill.style.display = ''; }
+      }
     });
   }
 
@@ -511,6 +551,13 @@ class CrabCameraCard extends HTMLElement {
         // Clear the change key so the next HA state update also triggers naturally
         this._prevPictures[id] = null;
         img.src = this._stillSrc(id);
+      }
+
+      // Also refresh the timestamp pill
+      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
+      if (tsPill) {
+        const t = this._getLastUpdatedTime(id);
+        if (t) { tsPill.textContent = t; tsPill.style.display = ''; }
       }
     });
   }
