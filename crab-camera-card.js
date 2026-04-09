@@ -116,13 +116,43 @@ class CrabCameraCard extends HTMLElement {
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
   _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
-  // Return a short "HH:MM" string from the still/companion entity's last_changed —
-  // i.e. the moment HA last received a new image from the camera.
+  // Return a short "HH:MM" string for the timestamp pill.
+  // Priority:
+  //   1. State of a companion sensor (e.g. sensor.kitchen_camera_last_activity)
+  //      whose state is a parseable ISO datetime — Ring and many integrations use this.
+  //   2. last_changed on the companion still/recording camera entity.
   _getLastUpdatedTime(id) {
+    const states = this._hass?.states || {};
+
+    // Derive root base name by stripping domain, live suffixes, and still suffixes.
+    // e.g. camera.kitchen_camera_last_recording -> kitchen_camera
+    //      camera.kitchen_camera_live_view      -> kitchen_camera
+    const LIVE_SUFFIXES  = ['_live_view', '_live_feed', '_live_stream', '_live', '_stream'];
+    const STILL_SUFFIXES = [
+      '_last_recording', '_last_snapshot', '_snapshot',
+      '_still', '_thumbnail', '_recording', '_clip', '_detection',
+    ];
+    let root = id.replace(/^camera\./, '');
+    for (const s of [...LIVE_SUFFIXES, ...STILL_SUFFIXES]) {
+      if (root.endsWith(s)) { root = root.slice(0, -s.length); break; }
+    }
+
+    // 1. Probe for a companion activity/motion sensor whose state is a datetime
+    const SENSOR_SUFFIXES = [
+      '_last_activity', '_last_motion', '_last_event',
+      '_last_capture', '_last_snapshot',
+    ];
+    for (const suffix of SENSOR_SUFFIXES) {
+      const s = states['sensor.' + root + suffix];
+      if (s && s.state && s.state !== 'unavailable' && s.state !== 'unknown') {
+        const d = new Date(s.state);
+        if (!isNaN(d)) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+
+    // 2. Fall back to last_changed on the companion still entity or the camera itself
     const stillId    = this._findStillEntity(id);
-    const watchState = stillId
-      ? this._hass?.states[stillId]
-      : this._hass?.states[id];
+    const watchState = stillId ? states[stillId] : states[id];
     const raw = watchState?.last_changed;
     if (!raw) return '';
     const d = new Date(raw);
