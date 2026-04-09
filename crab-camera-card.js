@@ -116,18 +116,20 @@ class CrabCameraCard extends HTMLElement {
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
   _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
-  // Return a short "HH:MM" time string for when the still image was last updated.
-  // Watches the companion still entity if one exists, otherwise the live entity itself.
-  _getLastUpdatedTime(id) {
-    const stillId    = this._findStillEntity(id);
-    const watchState = stillId
-      ? this._hass?.states[stillId]
-      : this._hass?.states[id];
-    const raw = watchState?.last_updated;
-    if (!raw) return '';
-    const d = new Date(raw);
-    if (isNaN(d)) return '';
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Return a short "HH:MM" string for right now — used to stamp the pill
+  // at the exact moment a new image finishes loading.
+  _nowTime() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Attach an onload listener to an <img> that updates the timestamp pill
+  // the instant the browser confirms the new image has arrived.
+  _stampTile(img, id) {
+    if (!img) return;
+    img.addEventListener('load', () => {
+      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
+      if (tsPill) { tsPill.textContent = this._nowTime(); tsPill.style.display = ''; }
+    }, { once: true });
   }
 
   // ── Find companion still/recording entity for a live camera ─────
@@ -366,6 +368,12 @@ class CrabCameraCard extends HTMLElement {
 
     if (entities.length > 0) {
       if (isLive) this._mountLiveStreams();
+      if (!isLive) {
+        entities.forEach(id => {
+          const img = this.shadowRoot?.getElementById(this._imgId(id));
+          this._stampTile(img, id);
+        });
+      }
       this._bindTiles();
     }
     this._startRefreshTimer();
@@ -396,13 +404,12 @@ class CrabCameraCard extends HTMLElement {
       // Still mode — single-frame image.
       // onerror: if the image fails to load for any reason, replace the tile
       // with the "Camera Offline" overlay so no broken-image icon is ever shown.
-      const ts = this._getLastUpdatedTime(id);
       inner = `
         <img class="cam-img" id="${this._imgId(id)}"
           src="${this._stillSrc(id)}" alt="${name}" draggable="false"
           onerror="var w=this.closest('.cam-wrap');if(w){w.innerHTML='<div class=\'cam-offline\'><span class=\'cam-offline-msg\'>Camera Offline</span></div>';}">
         <div class="cam-img-shield"></div>
-        ${ts ? `<div class="cam-timestamp" id="${this._tsId(id)}">${ts}</div>` : `<div class="cam-timestamp" id="${this._tsId(id)}" style="display:none"></div>`}`;
+        <div class="cam-timestamp" id="${this._tsId(id)}" style="display:none"></div>`;
     }
 
     return `
@@ -516,14 +523,7 @@ class CrabCameraCard extends HTMLElement {
       this._prevPictures[id] = updated;
 
       const img = this.shadowRoot?.getElementById(this._imgId(id));
-      if (img) { img.style.opacity = '1'; img.src = this._stillSrc(id); }
-
-      // Update the timestamp pill to reflect the new last_updated time
-      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
-      if (tsPill) {
-        const t = this._getLastUpdatedTime(id);
-        if (t) { tsPill.textContent = t; tsPill.style.display = ''; }
-      }
+      if (img) { img.style.opacity = '1'; img.src = this._stillSrc(id); this._stampTile(img, id); }
     });
   }
 
@@ -551,13 +551,7 @@ class CrabCameraCard extends HTMLElement {
         // Clear the change key so the next HA state update also triggers naturally
         this._prevPictures[id] = null;
         img.src = this._stillSrc(id);
-      }
-
-      // Also refresh the timestamp pill
-      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
-      if (tsPill) {
-        const t = this._getLastUpdatedTime(id);
-        if (t) { tsPill.textContent = t; tsPill.style.display = ''; }
+        this._stampTile(img, id);
       }
     });
   }
@@ -1017,13 +1011,7 @@ class CrabCameraCardEditor extends HTMLElement {
                 <label for="thumb_live">Live Feed</label>
               </div>
             </div>
-            <div class="input-row">
-              <label for="crabRefresh">Still Image Refresh Interval (seconds)</label>
-              <input type="number" id="crabRefresh" min="5" max="3600" step="5" placeholder="30">
-              <div style="font-size:11px;color:rgba(255,255,255,.35);margin-top:5px;line-height:1.5">
-                How often to poll for a new last-recording image. Min 5s. Also refreshes immediately after viewing the live feed.
-              </div>
-            </div>
+
           </div>
         </div>
 
@@ -1045,7 +1033,7 @@ class CrabCameraCardEditor extends HTMLElement {
     if (get('crabShowDot'))   get('crabShowDot').checked    = v.show_status_dot !== false;
     const mel = get('thumb_' + (v.thumbnail_mode || 'still'));
     if (mel) mel.checked = true;
-    if (get('crabRefresh')) get('crabRefresh').value = v.refresh_interval ?? 30;
+
   }
 
   _syncCheckboxes() {
@@ -1143,11 +1131,6 @@ class CrabCameraCardEditor extends HTMLElement {
       r.getElementById('thumb_' + val)?.addEventListener('change', e => {
         if (e.target.checked) this._fire('thumbnail_mode', val);
       });
-    });
-    r.getElementById('crabRefresh')?.addEventListener('change', e => {
-      const val = Math.max(5, parseInt(e.target.value, 10) || 30);
-      e.target.value = val;
-      this._fire('refresh_interval', val);
     });
   }
 }
