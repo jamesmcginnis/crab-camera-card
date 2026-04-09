@@ -6,6 +6,8 @@
 
 A scrollable camera card for [Home Assistant](https://www.home-assistant.io/). Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
+> **Designed for the [Home Assistant Ring integration](https://www.home-assistant.io/integrations/ring/).** The card is built and tested around Ring's camera entity naming conventions and automatically pairs each camera with its last recording image and last activity timestamp. It will work with other camera integrations but Ring is the primary supported integration.
+
 ---
 
 ## 🚀 Installation
@@ -39,8 +41,8 @@ Then:
 ## ✨ Features
 
 - 📹 **Horizontal scrollable strip** — cameras overflow off-screen so you can swipe through them
-- 🖼️ **Still Image mode** — displays the latest snapshot; auto-refreshes on a configurable interval and whenever Home Assistant detects a state change
-- 🕐 **Timestamp pill** — each still image shows the time it was last updated, overlaid in the top-right corner of the thumbnail
+- 🖼️ **Still Image mode** — displays the latest recording snapshot from your Ring camera, updated automatically whenever Home Assistant detects a new recording
+- 🕐 **Timestamp pill** — each still thumbnail shows the time of the last Ring activity, sourced directly from the `sensor.<camera>_last_activity` entity
 - 🟢 **Live Feed mode** — renders a true live stream in each thumbnail using Home Assistant's own stream component (supports HLS, WebRTC and MJPEG)
 - 🔍 **Tap to view** — opens a full-screen popup with a live stream, mute toggle and fullscreen button
 - 📋 **Long press** — opens the native Home Assistant more-info dialog
@@ -115,16 +117,25 @@ refresh_interval: 30
 
 ## 🕐 Timestamp Pill
 
-In still image mode, each thumbnail displays a small frosted-glass pill in the top-right corner showing the time the image was last updated. The time is sourced from the companion still/recording entity where one exists (e.g. `camera.back_garden_last_recording`), falling back to the camera entity itself. The pill updates automatically each time the image refreshes.
+In still image mode, each thumbnail displays a small frosted-glass pill in the top-right corner showing the time of the last activity. For Ring cameras the time is read directly from the `sensor.<camera>_last_activity` entity — this is the timestamp Ring records when it detects motion, a doorbell press, or any other event that triggers a recording.
+
+The card automatically pairs each camera entity with its activity sensor using Ring's naming convention:
+
+| Camera entity | Still image entity | Timestamp source |
+|---|---|---|
+| `camera.front_door` | `camera.front_door_last_recording` | `sensor.front_door_last_activity` |
+| `camera.back_garden` | `camera.back_garden_last_recording` | `sensor.back_garden_last_activity` |
+
+If no activity sensor is found the pill falls back to the `last_changed` time on the recording entity.
 
 ---
 
 ## 📝 Notes
 
+- **Ring integration** — ensure the [Ring integration](https://www.home-assistant.io/integrations/ring/) is installed and your cameras are configured in Home Assistant before adding this card.
 - **Still mode** images refresh automatically on state change and on the configured `refresh_interval`. The interval also resets immediately after you close the live popup so you always see the latest frame.
 - **Live mode** thumbnails use `ha-camera-stream`, the same component HA uses internally, so HLS, WebRTC and MJPEG cameras all work without any extra configuration.
 - The visual editor only lists cameras that support live streaming. Snapshot-only, recording clip and sensor cameras are excluded automatically.
-- **Companion still entities** — if your live camera has a linked recording or snapshot entity (e.g. `camera.front_door_last_recording`), the card will automatically use that entity's image for the still thumbnail and timestamp.
 
 ---
 
