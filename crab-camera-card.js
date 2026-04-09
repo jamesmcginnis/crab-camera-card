@@ -116,23 +116,29 @@ class CrabCameraCard extends HTMLElement {
   _streamId(id) { return 'crab-stream-' + id.replace(/[.\-]/g, '_'); }
   _tsId(id)     { return 'crab-ts-'     + id.replace(/[.\-]/g, '_'); }
 
-  // Return a short "HH:MM" string for right now — used to stamp the pill
-  // at the exact moment a new image finishes loading.
-  _nowTime() {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Return a short "HH:MM" string from the still/companion entity's last_changed —
+  // i.e. the moment HA last received a new image from the camera.
+  _getLastUpdatedTime(id) {
+    const stillId    = this._findStillEntity(id);
+    const watchState = stillId
+      ? this._hass?.states[stillId]
+      : this._hass?.states[id];
+    const raw = watchState?.last_changed;
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d)) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Attach an onload listener to an <img> that updates the timestamp pill
-  // the instant the browser confirms the new image has arrived.
+  // Update the timestamp pill for a tile from the entity's last_changed time.
   _stampTile(img, id) {
-    if (!img) return;
-    img.addEventListener('load', () => {
-      const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
-      if (tsPill) { tsPill.textContent = this._nowTime(); tsPill.style.display = ''; }
-    }, { once: true });
+    const tsPill = this.shadowRoot?.getElementById(this._tsId(id));
+    if (!tsPill) return;
+    const t = this._getLastUpdatedTime(id);
+    if (t) { tsPill.textContent = t; tsPill.style.display = ''; }
   }
 
-  // ── Find companion still/recording entity for a live camera ─────
+    // ── Find companion still/recording entity for a live camera ─────
   // Example: camera.back_yard_camara_live_view  →  camera.back_yard_camara_last_recording
   // Strategy: strip any known live suffix to get the shared base name,
   // then probe for known still suffixes on that base.
