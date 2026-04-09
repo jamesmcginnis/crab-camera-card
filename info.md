@@ -6,6 +6,8 @@
 
 A scrollable camera card for Home Assistant. Display all your cameras in a horizontal strip — tap to view a full live feed, long-press for the native HA dialog.
 
+> **Designed for the [Home Assistant Ring integration](https://www.home-assistant.io/integrations/ring/).** The card is built and tested around Ring's camera entity naming conventions and automatically pairs each camera with its last recording image and last activity timestamp. It will work with other camera integrations but Ring is the primary supported integration.
+
 ---
 
 ## Installation via HACS
@@ -36,8 +38,8 @@ Go to **Settings → Dashboards → ⋮ → Resources** and add `/hacsfiles/crab
 ## Features
 
 - 📹 **Scrollable camera strip** — swipe through all your cameras in a single row
-- 🖼️ **Still Image mode** — latest snapshot, auto-refreshed on a configurable interval and on state change
-- 🕐 **Timestamp pill** — time the image was last updated, overlaid in the top-right corner of each still thumbnail
+- 🖼️ **Still Image mode** — displays the latest recording snapshot from your Ring camera, updated automatically whenever Home Assistant detects a new recording
+- 🕐 **Timestamp pill** — each still thumbnail shows the time of the last Ring activity, sourced directly from the `sensor.<camera>_last_activity` entity
 - 🟢 **Live Feed mode** — true live stream in each thumbnail (HLS, WebRTC, MJPEG)
 - 🔍 **Tap to view** — full-screen popup with live stream, mute toggle and fullscreen button
 - 🔇 **Mute toggle** and **⛶ Fullscreen** button in the popup
