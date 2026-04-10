@@ -373,7 +373,7 @@ class CrabCameraCard extends HTMLElement {
         }
 
         .cam-timestamp {
-          position: absolute; top: 7px; right: 7px;
+          position: absolute; bottom: 7px; left: 7px;
           z-index: 4; pointer-events: none;
           background: rgba(0,0,0,0.52);
           backdrop-filter: blur(6px);
